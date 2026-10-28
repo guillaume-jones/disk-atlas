@@ -70,12 +70,15 @@ pub struct Roots {
 }
 
 pub fn roots() -> Roots {
-    let disk = if Path::new("/System/Volumes/Data").exists() {
+    let disk = if cfg!(windows) {
+        "C:\\"
+    } else if Path::new("/System/Volumes/Data").exists() {
         "/System/Volumes/Data"
     } else {
         "/"
     };
-    Roots { home: std::env::var("HOME").unwrap_or_default(), disk }
+    let home = std::env::home_dir().map_or_else(String::new, |h| h.to_string_lossy().into_owned());
+    Roots { home, disk }
 }
 
 #[derive(Default)]

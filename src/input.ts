@@ -17,7 +17,7 @@ export interface InputHandlers {
   click(point: Point, reveal: boolean): void;
 }
 
-/** Drag or trackpad-scroll to pan, wheel or pinch to zoom, click to descend, ⌘-click to reveal. */
+/** Drag or trackpad-scroll to pan, wheel or pinch to zoom, click to descend, ⌘- or Ctrl-click to reveal. */
 export function bindInput(canvas: HTMLCanvasElement, camera: Camera, handlers: InputHandlers) {
   let drag: { x: number; y: number; moved: boolean } | null = null;
   const pointOf = (event: MouseEvent): Point => ({ x: event.clientX, y: event.clientY });
@@ -44,7 +44,7 @@ export function bindInput(canvas: HTMLCanvasElement, camera: Camera, handlers: I
   canvas.addEventListener("pointerup", (event) => {
     const clicked = drag !== null && !drag.moved;
     drag = null;
-    if (clicked) handlers.click(pointOf(event), event.metaKey);
+    if (clicked) handlers.click(pointOf(event), event.metaKey || event.ctrlKey);
   });
 
   canvas.addEventListener("pointerleave", () => handlers.hover(null));

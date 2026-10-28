@@ -7,6 +7,7 @@ use crate::scan::{Kind, Node, Stats, VolumeSpace};
 use names::{Gazetteer, Lang};
 use serde::{Serialize, Serializer};
 use std::cmp::Reverse;
+use std::path::{MAIN_SEPARATOR, Path};
 
 /// Collapse a folder into its child when the child holds this share of it.
 const COLLAPSE_SHARE: f64 = 0.98;
@@ -28,9 +29,27 @@ const MIN_CITY_FILES: u64 = 50;
 const MIN_OUTPOST_FILES: u64 = 5000;
 /// Top-level folders of a whole-disk survey that freeze into polar ice.
 const POLAR: &[&str] = &[
-    "System", "Library", "private", "usr", "cores", "sw", "opt", "bin", "sbin", "Volumes",
+    "System",
+    "Library",
+    "private",
+    "usr",
+    "cores",
+    "sw",
+    "opt",
+    "bin",
+    "sbin",
+    "Volumes",
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "ProgramData",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "Recovery",
+    "PerfLogs",
 ];
-const SYSTEM_ROOTS: &[&str] = &["/", "/System/Volumes/Data"];
+/// macOS's writable data volume, surveyed instead of `/` when it exists.
+const DATA_VOLUME: &str = "/System/Volumes/Data";
 
 /// How payloads spell "no region": the world's parent, cells outside a patch, a tile's root.
 pub const NO_REGION: u32 = u32::MAX;
@@ -281,10 +300,10 @@ impl Builder {
 }
 
 fn join(base: &str, name: &str) -> String {
-    if base.ends_with('/') {
+    if base.ends_with(['/', MAIN_SEPARATOR]) {
         format!("{base}{name}")
     } else {
-        format!("{base}/{name}")
+        format!("{base}{MAIN_SEPARATOR}{name}")
     }
 }
 
@@ -381,7 +400,7 @@ impl Builder {
 
 pub fn build(root: Node, root_path: &str, space: VolumeSpace, now: f64) -> Geo {
     let VolumeSpace { capacity, free } = space;
-    let whole_disk = SYSTEM_ROOTS.contains(&root_path);
+    let whole_disk = root_path == DATA_VOLUME || Path::new(root_path).parent().is_none();
     let (polar, land, mut loose) = top_level(root, root_path, whole_disk);
     let land_total = land.iter().map(|i| i.node.total.size).sum::<u64>() + loose.size;
     let scanned = land_total + polar.iter().map(|i| i.node.total.size).sum::<u64>();

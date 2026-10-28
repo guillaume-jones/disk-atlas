@@ -91,9 +91,13 @@ fn scan(root: String) -> Result<(), Box<dyn std::error::Error>> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let result = match args.get(1).map(String::as_str) {
-        Some("scan") => match args.get(2).cloned().or_else(|| std::env::var("HOME").ok()) {
+        Some("scan") => match args
+            .get(2)
+            .cloned()
+            .or_else(|| std::env::home_dir().map(|h| h.to_string_lossy().into_owned()))
+        {
             Some(root) => scan(root),
-            None => Err("no root given and HOME is unset".into()),
+            None => Err("no root given and no home folder found".into()),
         },
         Some("serve") => {
             let port = args.get(2).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);

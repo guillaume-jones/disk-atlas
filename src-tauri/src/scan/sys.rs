@@ -1,13 +1,11 @@
-//! The crate's only unsafe code: the two macOS filesystem calls std doesn't wrap. Everything else, including
-//! parsing the kernel's packed attribute buffers, is safe and bounds-checked.
+//! The crate's only unsafe code: macOS's getattrlistbulk, which std doesn't wrap. Everything else, including parsing
+//! the kernel's packed attribute buffers, is safe and bounds-checked.
 #![allow(unsafe_code)]
 
 use std::cell::RefCell;
-use std::ffi::CString;
 use std::fs::OpenOptions;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
@@ -146,23 +144,4 @@ impl Reader<'_> {
     fn i64(&mut self) -> Option<i64> {
         self.take().map(i64::from_ne_bytes)
     }
-}
-
-#[derive(Default)]
-pub struct VolumeSpace {
-    pub capacity: u64,
-    pub free: u64,
-}
-
-/// Size and free space of the volume holding `path`. On APFS free space is shared across the container.
-pub fn volume_space(path: &Path) -> Option<VolumeSpace> {
-    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
-    // SAFETY: statfs is plain old data, so all-zero bytes are a valid value.
-    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `path` is NUL-terminated and `st` is a valid, writable statfs.
-    if unsafe { libc::statfs(path.as_ptr(), &raw mut st) } != 0 {
-        return None;
-    }
-    let block = u64::from(st.f_bsize);
-    Some(VolumeSpace { capacity: st.f_blocks * block, free: st.f_bavail * block })
 }

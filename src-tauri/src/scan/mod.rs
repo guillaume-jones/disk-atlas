@@ -1,20 +1,17 @@
 //! Walks a folder tree in parallel into a size-summarised tree of [`Node`]s.
+#[cfg(target_os = "macos")]
 mod sys;
 
 use crate::lock;
 use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-
-pub use sys::{VolumeSpace, volume_space};
+use std::time::UNIX_EPOCH;
 
 /// Largest files kept as individual nodes per directory; the rest become dust.
 const KEEP_FILES: usize = 4;
@@ -24,12 +21,14 @@ const MIN_NODE_BYTES: u64 = 512 * 1024;
 const MIN_FILE_WEIGHT: u64 = 4096;
 /// getattrlistbulk reads one directory sequentially; bigger ones are stat-ed in parallel to keep more reads in
 /// flight on a cold cache.
+#[cfg(target_os = "macos")]
 const HUGE_DIR_ENTRIES: u32 = 2000;
 /// The walk recurses once per directory level.
 const SCAN_STACK_BYTES: usize = 64 << 20;
 /// Unit of `st_blocks`.
+#[cfg(unix)]
 const STAT_BLOCK_BYTES: u64 = 512;
-const JUNK: &[&str] = &[".DS_Store", ".localized"];
+const JUNK: &[&str] = &[".DS_Store", ".localized", "desktop.ini", "Thumbs.db"];
 /// Extensions of folders macOS presents as single documents or apps.
 pub const BUNDLE_EXTENSIONS: &[&str] = &[
     "app", "photoslibrary", "photolibrary", "musiclibrary", "tvlibrary", "imovielibrary", "fcpbundle", "aplibrary", "lrlibrary", "lrdata",
@@ -151,9 +150,46 @@ enum Entry {
     },
 }
 
+/// Device, inode, hard-link count and allocated bytes. Windows' std doesn't expose the first three, so there every
+/// file counts as unlinked and every folder as on the same volume.
+struct Identity {
+    device: u64,
+    inode: u64,
+    links: u64,
+    allocated: u64,
+}
+
+#[cfg(unix)]
+fn identity(meta: &fs::Metadata) -> Identity {
+    use std::os::unix::fs::MetadataExt;
+    Identity {
+        device: meta.dev(),
+        inode: meta.ino(),
+        links: meta.nlink(),
+        allocated: meta.blocks() * STAT_BLOCK_BYTES,
+    }
+}
+
+#[cfg(not(unix))]
+fn identity(meta: &fs::Metadata) -> Identity {
+    Identity { device: 0, inode: 0, links: 1, allocated: meta.len() }
+}
+
+#[derive(Default)]
+pub struct VolumeSpace {
+    pub capacity: u64,
+    pub free: u64,
+}
+
+/// Size and free space of the volume holding `path`. On APFS free space is shared across the container.
+pub fn volume_space(path: &Path) -> Option<VolumeSpace> {
+    let stats = fs4::statvfs(path).ok()?;
+    Some(VolumeSpace { capacity: stats.total_space(), free: stats.available_space() })
+}
+
 pub fn scan(root: &Path, progress: &Progress) -> io::Result<Node> {
     let walk = Walk {
-        device: fs::metadata(root)?.dev(),
+        device: identity(&fs::metadata(root)?).device,
         progress,
         linked: Mutex::new(HashSet::new()),
     };
@@ -220,7 +256,15 @@ impl Walk<'_> {
         node
     }
 
+    #[cfg(not(target_os = "macos"))]
     fn list_bulk(&self, path: &Path) -> io::Result<Vec<Entry>> {
+        self.list_parallel(path)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn list_bulk(&self, path: &Path) -> io::Result<Vec<Entry>> {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
         let mut entries = Vec::new();
         sys::read_dir_bulk(path, |raw_name, kind| {
             let name = String::from_utf8_lossy(raw_name).into_owned();
@@ -230,7 +274,7 @@ impl Walk<'_> {
             match kind {
                 sys::EntryKind::Dir { entries: count, mount_point } => {
                     let path = path.join(OsStr::from_bytes(raw_name));
-                    let foreign = mount_point && fs::symlink_metadata(&path).map_or(true, |m| m.dev() != self.device);
+                    let foreign = mount_point && fs::symlink_metadata(&path).map_or(true, |m| identity(&m).device != self.device);
                     if !foreign {
                         entries.push(Entry::Dir(Subdir { path, name, huge: count > HUGE_DIR_ENTRIES }));
                     }
@@ -258,11 +302,13 @@ impl Walk<'_> {
                     return None;
                 }
                 let meta = entry.metadata().ok()?;
-                if meta.is_dir() && meta.dev() == self.device {
+                let id = identity(&meta);
+                if meta.is_dir() && id.device == self.device {
                     Some(Entry::Dir(Subdir { path: entry.path(), name, huge: false }))
                 } else if meta.is_file() {
-                    let stats = Stats::file(meta.blocks() * STAT_BLOCK_BYTES, meta.mtime() as f64);
-                    Some(Entry::File { name, inode: meta.ino(), links: meta.nlink(), stats })
+                    let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+                    let stats = Stats::file(id.allocated, mtime);
+                    Some(Entry::File { name, inode: id.inode, links: id.links, stats })
                 } else {
                     None
                 }

@@ -23,10 +23,10 @@ serde_json = "1"
 rayon = "1"
 delaunator = "1"
 noise = "0.9"
-libc = "0.2"
 tiny_http = "0.12"
 form_urlencoded = "1"
 thiserror = "2"
+fs4 = "1.1.0"
 
 [lints.rust]
 unsafe_code = "deny"
@@ -54,3 +54,6 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
