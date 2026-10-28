@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Disk Atlas</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="sheet" hidden></div>
+    <canvas id="terrain"></canvas>
+    <canvas id="ink"></canvas>
+
+    <button id="rescan" hidden><span>☞</span> New Survey</button>
+    <div id="toast" class="slip" hidden>Surveying…</div>
+
+    <aside id="legend" hidden>
+      <div id="legend-body">
+      <h2>Days since last modified</h2>
+      <div class="strip">
+        <ol id="key"></ol>
+        <div class="area"><span class="area-cell"><span id="area-box"></span></span><span id="area-text"></span></div>
+      </div>
+      </div>
+    </aside>
+
+    <aside id="note" hidden>
+      <div id="note-name"></div>
+      <div id="note-path"></div>
+      <div id="note-facts"></div>
+    </aside>
+
+    <section id="start">
+      <div class="book">
+        <button id="close-start" class="close" hidden aria-label="Close">×</button>
+        <div class="rule"></div>
+        <h1>The Disk Atlas</h1>
+        <div class="rule"></div>
+        <p class="fleuron">❦</p>
+        <nav class="contents">
+          <button data-root="home">
+            <span class="num">I.</span><span class="title">The Home Folder</span
+            ><span class="leader"></span><span id="home-path"></span>
+          </button>
+          <button data-root="disk">
+            <span class="num">II.</span><span class="title">The Whole Disk</span
+            ><span class="leader"></span><span id="disk-path"></span>
+          </button>
+        </nav>
+        <form id="custom">
+          <span class="num">III.</span>
+          <input
+            id="custom-path"
+            placeholder="Another folder"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </form>
+        <p id="progress" hidden></p>
+        <p id="error" hidden></p>
+      </div>
+    </section>
+  </body>
+</html>

@@ -1,0 +1,352 @@
+@import "@fontsource/im-fell-english/400.css";
+@import "@fontsource/im-fell-english/400-italic.css";
+@import "@fontsource/im-fell-english-sc/400.css";
+@import "@fontsource/old-standard-tt/400.css";
+@import "@fontsource/old-standard-tt/400-italic.css";
+@import "@fontsource/old-standard-tt/700.css";
+
+:root {
+  --ink: #2a1f16;
+  --ink-soft: #6e5a45;
+  --paper: #efe5cc;
+  --fell: "IM Fell English", Georgia, serif;
+  --fell-sc: "IM Fell English SC", Georgia, serif;
+  --old: "Old Standard TT", Georgia, serif;
+  font-family: var(--fell);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  background-color: #4a2f1c;
+  background-size: 1024px 1024px;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(10, 5, 2, 0.55) 100%);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+}
+
+#ink {
+  cursor: crosshair;
+}
+
+/* Paper with a faint fibre texture. */
+.slip,
+#sheet,
+.book {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(ellipse at 30% 20%, rgba(255, 250, 235, 0.5), transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(150, 110, 60, 0.12), transparent 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.25 0 0 0 0 0.12 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+#sheet {
+  position: fixed;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.slip {
+  position: fixed;
+  z-index: 2;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+}
+
+/* A printed Edwardian ticket: paper, double rule, pointing hand. */
+#rescan {
+  position: fixed;
+  z-index: 2;
+  top: 14px;
+  left: 16px;
+  padding: 6px 14px 5px;
+  font: italic 15px var(--old);
+  color: #000;
+  background: var(--paper);
+  border: 3px double #000;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+}
+
+#rescan span {
+  font-style: normal;
+  margin-right: 3px;
+}
+
+#rescan:hover {
+  background: #e6dab9;
+}
+
+#toast {
+  top: 16px;
+  right: 16px;
+  padding: 7px 14px 6px;
+  font: italic 14px var(--old);
+  color: #000;
+}
+
+/* Recency strip printed on the sheet below the map. */
+#legend {
+  position: fixed;
+  z-index: 1;
+  color: #000;
+  font-family: var(--old);
+  pointer-events: none;
+}
+
+#legend h2 {
+  margin: 0 0 5px;
+  font: 700 11px var(--old);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+#key {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #000;
+}
+
+#key li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 28px;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+#key li + li {
+  border-left: 1px solid #000;
+}
+
+.area {
+  display: flex;
+  align-items: center;
+  width: 110px;
+  gap: 6px;
+  font: italic 11px var(--old);
+  white-space: nowrap;
+}
+
+/* Fixed cell so the changing square size doesn't shift the text. */
+.area-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+#area-box {
+  flex: none;
+  border: 1px solid #000;
+}
+
+/* The ruled note the viewer holds, describing whatever is under the cursor. */
+#note {
+  position: fixed;
+  z-index: 2;
+  left: 18px;
+  bottom: 18px;
+  width: 360px;
+  padding: 12px 16px 12px 36px;
+  color: #000;
+  font-family: var(--old);
+  line-height: 20px;
+  background:
+    linear-gradient(90deg, transparent 25px, rgba(170, 60, 50, 0.4) 25px 26px, transparent 26px),
+    repeating-linear-gradient(transparent 0 19px, rgba(70, 100, 140, 0.18) 19px 20px),
+    #f4eedc;
+  background-position: 0 2px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+#note-name {
+  font: 700 15px/20px var(--old);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+#note-path {
+  font: 12px/20px "Courier New", Courier, monospace;
+  word-break: break-all;
+}
+
+#note-facts {
+  font: italic 14px/20px var(--old);
+}
+
+/* Title page */
+
+#start {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  background: rgba(20, 10, 4, 0.35);
+  display: grid;
+  place-items: center;
+}
+
+.book {
+  position: relative;
+  width: min(520px, calc(100vw - 48px));
+  padding: 64px 56px 52px;
+  text-align: center;
+  box-shadow:
+    inset 18px 0 30px -18px rgba(90, 60, 30, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    0 26px 60px rgba(0, 0, 0, 0.6);
+}
+
+.book h1 {
+  margin: 18px 0;
+  font: 46px/1.1 var(--fell-sc);
+  letter-spacing: 0.06em;
+  font-weight: 400;
+}
+
+.rule {
+  height: 4px;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+
+.fleuron {
+  margin: 22px 0 30px;
+  font-size: 26px;
+}
+
+.contents {
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.contents button,
+#custom {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  font-size: 19px;
+}
+
+.contents button:hover .title {
+  color: #7a2a1a;
+}
+
+.contents button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.num {
+  width: 30px;
+  font-family: var(--fell-sc);
+}
+
+.leader {
+  flex: 1;
+  border-bottom: 1px dotted rgba(42, 31, 22, 0.6);
+  transform: translateY(-5px);
+}
+
+#home-path,
+#disk-path {
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+
+#custom {
+  margin-top: 10px;
+}
+
+#custom input {
+  flex: 1;
+  padding: 0 0 2px;
+  font: italic 19px var(--fell);
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted rgba(42, 31, 22, 0.6);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#custom input::placeholder {
+  color: rgba(42, 31, 22, 0.45);
+}
+
+#progress {
+  margin: 28px 0 0;
+  font-style: italic;
+  font-size: 17px;
+}
+
+#error {
+  margin: 24px 0 0;
+  font-style: italic;
+  color: #7a2a1a;
+}
+
+.close {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  font-size: 24px;
+}
