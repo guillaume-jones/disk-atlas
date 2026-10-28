@@ -1,0 +1,3 @@
+max_width = 140
+short_array_element_width_threshold = 24
+struct_lit_width = 60

@@ -1,18 +1,26 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri, type InvokeArgs } from "@tauri-apps/api/core";
+import type { Rect } from "./geometry";
+import * as parse from "./validate";
 
-export const inTauri = isTauri();
+const KINDS = [
+  "world",
+  "continent",
+  "island",
+  "polar",
+  "ocean",
+  "isles",
+  "land",
+  "file",
+  "bundle",
+  "unseen",
+] as const;
+export type Kind = (typeof KINDS)[number];
 
-export type Kind =
-  | "world"
-  | "continent"
-  | "island"
-  | "polar"
-  | "ocean"
-  | "isles"
-  | "land"
-  | "file"
-  | "bundle"
-  | "unseen";
+const PHASES = ["idle", "scanning", "mapping", "ready", "failed"] as const;
+export type Phase = (typeof PHASES)[number];
+
+/** Region id meaning "none": the world's parent, and mesh cells outside every region. */
+export const NO_REGION = 0xffffffff;
 
 export interface Region {
   id: number;
@@ -20,21 +28,32 @@ export interface Region {
   depth: number;
   kind: Kind;
   name: string;
+  /** Shown instead of the path for regions that aren't folders, e.g. the sea of free space. */
   label: string;
   path: string;
   size: number;
-  count: number;
+  /** Unix seconds; 0 when unknown. */
   mtime: number;
   city: string | null;
   children: number[];
+}
+
+export interface SurveyMeta {
+  /** Bytes represented by the whole map. */
+  capacity: number;
+  scanned: number;
+  free: number;
+  /** Unix seconds at scan time. */
+  now: number;
+  regions: Region[];
 }
 
 export interface Label {
   id: number;
   x: number;
   y: number;
-  r: number;
-  bbox: [number, number, number, number];
+  radius: number;
+  bounds: Rect;
   cells: number;
 }
 
@@ -42,127 +61,194 @@ export interface City {
   id: number;
   x: number;
   y: number;
-  pop: number;
+  population: number;
 }
 
-export interface WorldMeta {
-  capacity: number;
-  disk: number;
-  scanned: number;
-  free: number;
-  now: number;
-  root: string;
-  regions: Region[];
-}
-
-export interface PatchData {
+/** A region patch or detail tile: a grid-ordered Voronoi mesh plus its ink. */
+export interface Patch {
+  /** The region a patch details, or NO_REGION for a tile. */
   root: number;
+  /** Finer patches draw over coarser ones; tiles sit below every region patch. */
   depth: number;
-  level: number | null;
   ox: number;
   oy: number;
-  s: number;
+  /** Grid spacing in world units. */
+  spacing: number;
   cols: number;
   rows: number;
   labels: Label[];
   cities: City[];
-  world: WorldMeta | null;
+  /** Per vertex, interleaved x, y. */
   pos: Float32Array;
   elev: Float32Array;
   shade: Float32Array;
   ice: Float32Array;
+  /** Owning region per vertex, or NO_REGION. */
   cell: Uint32Array;
   tris: Uint32Array;
+  /** Segments of (ax, ay, bx, by, border level). */
   borders: Float32Array;
+  /** Segments of (ax, ay, bx, by, river magnitude). */
   rivers: Float32Array;
 }
 
 export interface Status {
-  phase: "idle" | "scanning" | "mapping" | "ready" | "failed";
+  phase: Phase;
   message: string;
   files: number;
-  dirs: number;
   bytes: number;
-  denied: number;
-  elapsed: number;
-  regions: number;
 }
 
-async function http(url: string, method = "GET"): Promise<Response> {
-  const res = await fetch(url, { method });
-  if (!res.ok) throw new Error(await res.text());
-  return res;
+export interface Roots {
+  home: string;
+  disk: string;
 }
 
-export const startScan = (root: string) =>
-  inTauri
-    ? invoke<void>("start_scan", { root })
-    : http(`/api/scan?root=${encodeURIComponent(root)}`, "POST").then(() => undefined);
+const inTauri = isTauri();
 
-export const status = (): Promise<Status> =>
-  inTauri ? invoke<Status>("scan_status") : http("/api/status").then((r) => r.json());
+async function http(path: string, method = "GET"): Promise<Response> {
+  const response = await fetch(`/api/${path}`, { method });
+  if (!response.ok) throw new Error(await response.text());
+  return response;
+}
 
-export const roots = (): Promise<{ home: string; disk: string }> =>
-  inTauri ? invoke("scan_roots") : http("/api/roots").then((r) => r.json());
+async function json(command: string, path: string): Promise<unknown> {
+  return inTauri ? invoke<unknown>(command) : (await http(path)).json();
+}
 
-export const world = async () =>
-  decode(
-    inTauri ? await invoke<ArrayBuffer>("world") : await (await http("/api/world")).arrayBuffer(),
-  );
+async function binary(command: string, args: InvokeArgs, path: string): Promise<ArrayBuffer> {
+  const payload = inTauri
+    ? await invoke<unknown>(command, args)
+    : await (await http(path)).arrayBuffer();
+  if (!(payload instanceof ArrayBuffer))
+    throw new TypeError(`${command} did not return binary data`);
+  return payload;
+}
+
+export async function startScan(root: string): Promise<void> {
+  if (inTauri) await invoke("start_scan", { root });
+  else await http(`scan?root=${encodeURIComponent(root)}`, "POST");
+}
+
+export async function status(): Promise<Status> {
+  const fields = parse.object(await json("scan_status", "status"));
+  return {
+    phase: parse.literal(fields.phase, PHASES),
+    message: parse.string(fields.message),
+    files: parse.number(fields.files),
+    bytes: parse.number(fields.bytes),
+  };
+}
+
+export async function roots(): Promise<Roots> {
+  const fields = parse.object(await json("scan_roots", "roots"));
+  return { home: parse.string(fields.home), disk: parse.string(fields.disk) };
+}
+
+export async function world(): Promise<{ survey: SurveyMeta; patch: Patch }> {
+  const { patch, world } = decode(await binary("world", {}, "world"));
+  return { survey: parseSurvey(world), patch };
+}
 
 export const patch = async (id: number) =>
-  decode(
-    inTauri
-      ? await invoke<ArrayBuffer>("patch", { id })
-      : await (await http(`/api/patch?id=${id}`)).arrayBuffer(),
-  );
+  decode(await binary("patch", { id }, `patch?id=${id}`)).patch;
 
 export const tile = async (level: number, x: number, y: number) =>
-  decode(
-    inTauri
-      ? await invoke<ArrayBuffer>("tile", { level, x, y })
-      : await (await http(`/api/tile?l=${level}&x=${x}&y=${y}`)).arrayBuffer(),
-  );
+  decode(await binary("tile", { level, x, y }, `tile?l=${level}&x=${x}&y=${y}`)).patch;
 
-export async function reveal(path: string) {
+export async function reveal(path: string): Promise<void> {
   if (!inTauri || !path) return;
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   await revealItemInDir(path);
 }
 
-function decode(buf: ArrayBuffer): PatchData {
-  const len = new DataView(buf).getUint32(4, true);
-  const m = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, len)));
-  let off = 8 + Math.ceil(len / 4) * 4;
-  const n = m.cols * m.rows;
-  const f32 = (k: number) => {
-    const a = new Float32Array(buf, off, k);
-    off += k * 4;
-    return a;
-  };
-  const u32 = (k: number) => {
-    const a = new Uint32Array(buf, off, k);
-    off += k * 4;
-    return a;
-  };
+function parseRegion(value: unknown): Region {
+  const fields = parse.object(value);
   return {
-    ...m,
-    labels: m.labels.map(([id, x, y, r, x0, y0, x1, y1, cells]: number[]) => ({
-      id,
-      x,
-      y,
-      r,
-      bbox: [x0, y0, x1, y1],
-      cells,
-    })),
-    cities: m.cities.map(([id, x, y, pop]: number[]) => ({ id, x, y, pop })),
-    pos: f32(2 * n),
-    elev: f32(n),
-    shade: f32(n),
-    ice: f32(n),
-    cell: u32(n),
-    tris: u32(3 * m.ntri),
-    borders: f32(5 * m.nborder),
-    rivers: f32(5 * m.nriver),
+    id: parse.number(fields.id),
+    parent: parse.number(fields.parent),
+    depth: parse.number(fields.depth),
+    kind: parse.literal(fields.kind, KINDS),
+    name: parse.string(fields.name),
+    label: parse.string(fields.label),
+    path: parse.string(fields.path),
+    size: parse.number(fields.size),
+    mtime: parse.number(fields.mtime),
+    city: parse.nullable(fields.city, parse.string),
+    children: parse.array(fields.children, parse.number),
   };
+}
+
+function parseSurvey(value: unknown): SurveyMeta {
+  const fields = parse.object(value);
+  return {
+    capacity: parse.number(fields.capacity),
+    scanned: parse.number(fields.scanned),
+    free: parse.number(fields.free),
+    now: parse.number(fields.now),
+    regions: parse.array(fields.regions, parseRegion),
+  };
+}
+
+function parseLabel(value: unknown): Label {
+  const [id, x, y, radius, x0, y0, x1, y1, cells] = parse.numbers(value, 9);
+  return { id, x, y, radius, bounds: { x0, y0, x1, y1 }, cells };
+}
+
+function parseCity(value: unknown): City {
+  const [id, x, y, population] = parse.numbers(value, 4);
+  return { id, x, y, population };
+}
+
+const MAGIC = "ATL1";
+const PREAMBLE_BYTES = 8;
+const SEGMENT_FLOATS = 5;
+
+/** Layout: "ATL1", u32 JSON length, JSON header padded to 4 bytes, then the typed arrays in `Patch` order. */
+function decode(buffer: ArrayBuffer): { patch: Patch; world: unknown } {
+  const text = new TextDecoder();
+  if (text.decode(new Uint8Array(buffer, 0, MAGIC.length)) !== MAGIC)
+    throw new TypeError("Not an atlas payload");
+  const headerBytes = new DataView(buffer).getUint32(MAGIC.length, true);
+  const header = parse.object(
+    JSON.parse(text.decode(new Uint8Array(buffer, PREAMBLE_BYTES, headerBytes))),
+  );
+  const cols = parse.number(header.cols);
+  const rows = parse.number(header.rows);
+  const vertices = cols * rows;
+
+  let offset = PREAMBLE_BYTES + Math.ceil(headerBytes / 4) * 4;
+  const floats = (length: number) => {
+    const array = new Float32Array(buffer, offset, length);
+    offset += array.byteLength;
+    return array;
+  };
+  const uints = (length: number) => {
+    const array = new Uint32Array(buffer, offset, length);
+    offset += array.byteLength;
+    return array;
+  };
+
+  const patch: Patch = {
+    root: parse.number(header.root),
+    depth: parse.number(header.depth),
+    ox: parse.number(header.ox),
+    oy: parse.number(header.oy),
+    spacing: parse.number(header.s),
+    cols,
+    rows,
+    labels: parse.array(header.labels, parseLabel),
+    cities: parse.array(header.cities, parseCity),
+    pos: floats(2 * vertices),
+    elev: floats(vertices),
+    shade: floats(vertices),
+    ice: floats(vertices),
+    cell: uints(vertices),
+    tris: uints(3 * parse.number(header.ntri)),
+    borders: floats(SEGMENT_FLOATS * parse.number(header.nborder)),
+    rivers: floats(SEGMENT_FLOATS * parse.number(header.nriver)),
+  };
+  if (offset !== buffer.byteLength)
+    throw new TypeError(`Atlas payload has ${buffer.byteLength - offset} stray bytes`);
+  return { patch, world: header.world };
 }

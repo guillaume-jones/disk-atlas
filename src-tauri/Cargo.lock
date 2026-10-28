@@ -789,6 +789,7 @@ name = "disk-atlas"
 version = "0.1.0"
 dependencies = [
  "delaunator",
+ "form_urlencoded",
  "libc",
  "noise",
  "rayon",
@@ -797,6 +798,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "thiserror 2.0.21",
  "tiny_http",
 ]
 

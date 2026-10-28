@@ -1,161 +1,257 @@
-use crate::geo::{self, Geo};
+//! Runs surveys in the background and serves their world, patches and tiles, caching the most recent ones.
+use crate::geo::{self, Geo, RegionId};
+use crate::lock;
 use crate::scan::{self, Progress};
-use crate::util::NONE;
-use crate::world::{self, Patch};
-use serde_json::{Value, json};
-use std::collections::HashMap;
+use crate::world::{self, Built, MAX_TILE_LEVEL, Patch, TileKey};
+use serde::{Serialize, Serializer};
+use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
+use std::io;
 use std::path::Path;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-/// Compacted patch (kept as a parent for finer ones), its encoded payload, and a summary line.
-type Built = (Arc<Patch>, Arc<Vec<u8>>, String);
 const MAX_PATCHES: usize = 16;
 const MAX_TILES: usize = 24;
 
-fn built(geo: &Geo, mut patch: Patch) -> Built {
-    let bin = world::encode(geo, &patch);
-    let summary = format!("{} ({:.1} MB)", world::stats(&patch), bin.len() as f64 / 1e6);
-    patch.compact();
-    (Arc::new(patch), Arc::new(bin), summary)
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("A scan is already running")]
+    Busy,
+    #[error("No map yet")]
+    NoMap,
+    #[error("Unknown region {0}")]
+    UnknownRegion(u32),
+    #[error("Bad tile level {0}")]
+    BadTileLevel(u32),
+    #[error("{root}: {source}")]
+    Scan { root: String, source: io::Error },
+    #[error("Encoding failed: {0}")]
+    Encode(#[from] serde_json::Error),
 }
 
-/// Insert and evict the oldest entries beyond `cap`, never evicting `keep`.
-fn insert_capped<K: std::hash::Hash + Eq + Copy>(map: &mut HashMap<K, (Built, u64)>, key: K, value: Built, cap: usize, keep: Option<K>) {
-    let tick = map.values().map(|v| v.1).max().unwrap_or(0) + 1;
-    map.insert(key, (value, tick));
-    while map.len() > cap {
-        let Some(old) = map.iter().filter(|(k, _)| Some(**k) != keep).min_by_key(|(_, v)| v.1).map(|(k, _)| *k) else { break };
-        map.remove(&old);
+/// The frontend receives errors as their message.
+impl Serialize for Error {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    #[default]
+    Idle,
+    Scanning,
+    Mapping,
+    Ready,
+    Failed,
+}
+
+#[derive(Serialize)]
+pub struct Status {
+    pub phase: Phase,
+    /// The root being surveyed, or the error once failed.
+    pub message: String,
+    pub files: u64,
+    pub dirs: u64,
+    pub bytes: u64,
+    pub denied: u64,
+    /// Seconds since the survey started.
+    pub elapsed: f64,
+    pub regions: usize,
+}
+
+#[derive(Serialize)]
+pub struct Roots {
+    home: String,
+    disk: &'static str,
+}
+
+pub fn roots() -> Roots {
+    let disk = if Path::new("/System/Volumes/Data").exists() {
+        "/System/Volumes/Data"
+    } else {
+        "/"
+    };
+    Roots { home: std::env::var("HOME").unwrap_or_default(), disk }
+}
+
+#[derive(Default)]
+struct Job {
+    phase: Phase,
+    message: String,
+    started: Option<Instant>,
+    progress: Arc<Progress>,
+}
+
+/// A finished survey and everything generated from it.
+struct Survey {
+    geo: Arc<Geo>,
+    world: Arc<Built>,
+    patches: Mutex<Recent<RegionId>>,
+    tiles: Mutex<Recent<TileKey>>,
+}
+
+/// The `capacity` most recently built entries.
+struct Recent<K> {
+    capacity: usize,
+    entries: HashMap<K, Arc<Built>>,
+    order: VecDeque<K>,
+}
+
+impl<K: Copy + Eq + Hash> Recent<K> {
+    fn new(capacity: usize) -> Self {
+        Recent { capacity, entries: HashMap::new(), order: VecDeque::new() }
+    }
+
+    fn get(&self, key: &K) -> Option<Arc<Built>> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: K, built: Arc<Built>) {
+        if self.entries.insert(key, built).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
     }
 }
 
 #[derive(Default)]
 pub struct Engine {
-    progress: Progress,
-    phase: Mutex<(String, String)>,
-    started: Mutex<Option<Instant>>,
-    geo: RwLock<Option<Arc<Geo>>>,
-    patches: Mutex<HashMap<u32, (Built, u64)>>,
-    tiles: Mutex<HashMap<(u32, i64, i64), (Built, u64)>>,
-}
-
-pub fn roots() -> Value {
-    let disk = if Path::new("/System/Volumes/Data").exists() { "/System/Volumes/Data" } else { "/" };
-    json!({ "home": std::env::var("HOME").unwrap_or_default(), "disk": disk })
+    job: Mutex<Job>,
+    survey: Mutex<Option<Arc<Survey>>>,
 }
 
 impl Engine {
-    fn set_phase(&self, phase: &str, message: &str) {
-        *self.phase.lock().unwrap() = (phase.into(), message.into());
-    }
-
-    pub fn start(self: &Arc<Self>, root: String) -> Result<(), String> {
+    /// Starts surveying `root` in the background; poll [`Engine::status`] until it's ready.
+    pub fn start(self: &Arc<Self>, root: String) -> Result<(), Error> {
         {
-            let mut phase = self.phase.lock().unwrap();
-            if phase.0 == "scanning" || phase.0 == "mapping" {
-                return Err("A scan is already running".into());
+            let mut job = lock(&self.job);
+            if matches!(job.phase, Phase::Scanning | Phase::Mapping) {
+                return Err(Error::Busy);
             }
-            *phase = ("scanning".into(), root.clone());
+            *job = Job {
+                phase: Phase::Scanning,
+                message: root.clone(),
+                started: Some(Instant::now()),
+                progress: Arc::default(),
+            };
         }
-        self.progress.reset();
-        *self.started.lock().unwrap() = Some(Instant::now());
-        *self.geo.write().unwrap() = None;
-        self.patches.lock().unwrap().clear();
-        self.tiles.lock().unwrap().clear();
-        let me = self.clone();
+        *lock(&self.survey) = None;
+        let engine = self.clone();
         std::thread::spawn(move || {
-            if let Err(e) = me.run(&root) {
-                me.set_phase("failed", &e);
-            }
+            let (phase, message) = match engine.run_survey(&root) {
+                Ok(()) => (Phase::Ready, root),
+                Err(e) => (Phase::Failed, e.to_string()),
+            };
+            engine.set_phase(phase, message);
         });
         Ok(())
     }
 
-    fn run(&self, root: &str) -> Result<(), String> {
+    fn set_phase(&self, phase: Phase, message: String) {
+        let mut job = lock(&self.job);
+        job.phase = phase;
+        job.message = message;
+    }
+
+    fn run_survey(&self, root: &str) -> Result<(), Error> {
         let path = Path::new(root);
-        let node = scan::scan(path, &self.progress).map_err(|e| format!("{root}: {e}"))?;
-        self.set_phase("mapping", root);
-        let (capacity, free) = scan::volume(path);
+        let progress = lock(&self.job).progress.clone();
+        let node = scan::scan(path, &progress).map_err(|source| Error::Scan { root: root.into(), source })?;
+        self.set_phase(Phase::Mapping, root.into());
+        let space = scan::volume_space(path).unwrap_or_default();
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
-        let geo = Arc::new(geo::build(node, root, capacity, free, now));
-        let world = built(&geo, world::build_world(&geo));
-        self.patches.lock().unwrap().insert(geo::WORLD, (world, 0));
-        *self.geo.write().unwrap() = Some(geo);
-        self.set_phase("ready", root);
+        let geo = Arc::new(geo::build(node, root, space, now));
+        let world = Arc::new(world::build_world(&geo)?);
+        let survey = Survey {
+            geo,
+            world,
+            patches: Mutex::new(Recent::new(MAX_PATCHES)),
+            tiles: Mutex::new(Recent::new(MAX_TILES)),
+        };
+        *lock(&self.survey) = Some(Arc::new(survey));
         Ok(())
     }
 
-    pub fn status(&self) -> Value {
-        let (phase, message) = self.phase.lock().unwrap().clone();
-        let elapsed = self.started.lock().unwrap().map_or(0.0, |t| t.elapsed().as_secs_f64());
-        let p = &self.progress;
-        json!({
-            "phase": if phase.is_empty() { "idle" } else { &phase },
-            "message": message,
-            "files": p.files.load(Relaxed),
-            "dirs": p.dirs.load(Relaxed),
-            "bytes": p.bytes.load(Relaxed),
-            "denied": p.denied.load(Relaxed),
-            "elapsed": elapsed,
-            "regions": self.geo.read().unwrap().as_ref().map_or(0, |g| g.regions.len()),
-        })
+    pub fn status(&self) -> Status {
+        let job = lock(&self.job);
+        let p = &job.progress;
+        Status {
+            phase: job.phase,
+            message: job.message.clone(),
+            files: p.files.load(Relaxed),
+            dirs: p.dirs.load(Relaxed),
+            bytes: p.bytes.load(Relaxed),
+            denied: p.denied.load(Relaxed),
+            elapsed: job.started.map_or(0.0, |t| t.elapsed().as_secs_f64()),
+            regions: self.geo().map_or(0, |g| g.regions().len()),
+        }
+    }
+
+    fn current(&self) -> Result<Arc<Survey>, Error> {
+        lock(&self.survey).clone().ok_or(Error::NoMap)
     }
 
     pub fn geo(&self) -> Option<Arc<Geo>> {
-        self.geo.read().unwrap().clone()
+        lock(&self.survey).as_ref().map(|s| s.geo.clone())
     }
 
-    pub fn world(&self) -> Result<Vec<u8>, String> {
-        self.patch(geo::WORLD)
+    pub fn world(&self) -> Result<Arc<Built>, Error> {
+        Ok(self.current()?.world.clone())
     }
 
-    pub fn patch(&self, id: u32) -> Result<Vec<u8>, String> {
-        let geo = self.geo().ok_or("No map yet")?;
+    pub fn patch(&self, id: u32) -> Result<Arc<Built>, Error> {
+        let survey = self.current()?;
+        let geo = &survey.geo;
+        let id = geo.lookup(id).ok_or(Error::UnknownRegion(id))?;
+        if id == RegionId::WORLD {
+            return Ok(survey.world.clone());
+        }
         let parent = {
-            let patches = self.patches.lock().unwrap();
-            if let Some(((_, bin, _), _)) = patches.get(&id) {
-                return Ok(bin.to_vec());
+            let patches = lock(&survey.patches);
+            if let Some(built) = patches.get(&id) {
+                return Ok(built);
             }
-            let region = geo.regions.get(id as usize).ok_or("Unknown region")?;
-            let mut a = region.parent;
-            while a != NONE && !patches.contains_key(&a) {
-                a = geo.regions[a as usize].parent;
-            }
-            (patches.get(&a).ok_or("No parent patch")?.0).0.clone()
+            // The finest cached ancestor, which is at worst the world.
+            geo.ancestors(id)
+                .skip(1)
+                .find_map(|a| patches.get(&a))
+                .unwrap_or_else(|| survey.world.clone())
         };
-        let b = built(&geo, world::build_patch(&geo, &parent, id));
-        let out = b.1.to_vec();
-        insert_capped(&mut self.patches.lock().unwrap(), id, b, MAX_PATCHES, Some(geo::WORLD));
-        Ok(out)
+        let built = Arc::new(world::build_patch(geo, &parent.patch, id)?);
+        lock(&survey.patches).insert(id, built.clone());
+        Ok(built)
     }
 
-    pub fn tile(&self, level: u32, ix: i64, iy: i64) -> Result<Vec<u8>, String> {
-        let geo = self.geo().ok_or("No map yet")?;
-        if !(1..=24).contains(&level) {
-            return Err("Bad tile level".into());
+    pub fn tile(&self, tile: TileKey) -> Result<Arc<Built>, Error> {
+        let survey = self.current()?;
+        if !(1..=MAX_TILE_LEVEL).contains(&tile.level) {
+            return Err(Error::BadTileLevel(tile.level));
         }
-        if let Some(((_, bin, _), _)) = self.tiles.lock().unwrap().get(&(level, ix, iy)) {
-            return Ok(bin.to_vec());
+        if let Some(built) = lock(&survey.tiles).get(&tile) {
+            return Ok(built);
         }
-        let size = 0.5f64.powi(level as i32);
-        let (x0, y0) = (ix as f64 * size, iy as f64 * size);
-        let overlaps = |p: &Patch| {
-            let [a, b, c, d] = p.bounds();
-            a < x0 + size && c > x0 && b < y0 + size && d > y0
-        };
-        let mut parents: Vec<Arc<Patch>> = self.patches.lock().unwrap().values().map(|((p, ..), _)| p.clone()).filter(|p| overlaps(p)).collect();
-        parents.extend(self.tiles.lock().unwrap().iter().filter(|(k, ((p, ..), _))| k.0 < level && overlaps(p)).map(|(_, ((p, ..), _))| p.clone()));
-        parents.sort_by(|a, b| a.spacing().total_cmp(&b.spacing()));
-        let refs: Vec<&Patch> = parents.iter().map(|p| p.as_ref()).collect();
-        let b = built(&geo, world::build_tile(&geo, &refs, level, ix, iy));
-        let out = b.1.to_vec();
-        insert_capped(&mut self.tiles.lock().unwrap(), (level, ix, iy), b, MAX_TILES, None);
-        Ok(out)
-    }
-
-    pub fn patch_stats(&self, id: u32) -> Option<String> {
-        self.patches.lock().unwrap().get(&id).map(|((.., summary), _)| summary.clone())
+        let mut parents: Vec<Arc<Built>> = vec![survey.world.clone()];
+        parents.extend(lock(&survey.patches).entries.values().cloned());
+        parents.extend(
+            lock(&survey.tiles)
+                .entries
+                .iter()
+                .filter(|(k, _)| k.level < tile.level)
+                .map(|(_, b)| b.clone()),
+        );
+        parents.retain(|b| b.patch.overlaps(tile));
+        parents.sort_by(|a, b| a.patch.spacing().total_cmp(&b.patch.spacing()));
+        let parents: Vec<&Patch> = parents.iter().map(|b| &b.patch).collect();
+        let built = Arc::new(world::build_tile(&survey.geo, &parents, tile)?);
+        lock(&survey.tiles).insert(tile, built.clone());
+        Ok(built)
     }
 }
