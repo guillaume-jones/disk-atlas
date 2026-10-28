@@ -211,20 +211,14 @@ impl Engine {
         let survey = self.current()?;
         let geo = &survey.geo;
         let id = geo.lookup(id).ok_or(Error::UnknownRegion(id))?;
-        if id == RegionId::WORLD {
+        let Some(parent) = geo.region(id).parent else {
             return Ok(survey.world.clone());
-        }
-        let parent = {
-            let patches = lock(&survey.patches);
-            if let Some(built) = patches.get(&id) {
-                return Ok(built);
-            }
-            // The finest cached ancestor, which is at worst the world.
-            geo.ancestors(id)
-                .skip(1)
-                .find_map(|a| patches.get(&a))
-                .unwrap_or_else(|| survey.world.clone())
         };
+        if let Some(built) = lock(&survey.patches).get(&id) {
+            return Ok(built);
+        }
+        // Layouts depend on the parent patch, so rebuild it if evicted rather than borrowing a coarser ancestor.
+        let parent = self.patch(parent.into())?;
         let built = Arc::new(world::build_patch(geo, &parent.patch, id)?);
         lock(&survey.patches).insert(id, built.clone());
         Ok(built)
