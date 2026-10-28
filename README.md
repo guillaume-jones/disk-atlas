@@ -1,33 +1,42 @@
 # Disk Atlas
 
-A macOS and Windows disk usage visualizer that draws your filesystem as an early-20th-century printed world atlas, laid on a wooden table. Area is bytes: folders become continents, nations, provinces and islands, named from their most distinctive word (Npmia, Kingdom of Gradle, Isle of Claude). File counts become cities, small app bundles are free cities, free space is the sea, and system files freeze into polar ice. Elevation is recency, so recently touched data rises into mountains while stale data lies flat, keyed by a "days since last modified" strip printed on the sheet. Hover a region for the note in your hand (name, path, size, age), click to descend, ⌘-click (Ctrl-click on Windows) to reveal in Finder or Explorer. Zooming works like a magnifier: finer region patches and terrain tiles are generated on demand as you go.
+A disk usage visualizer for macOS and Windows that draws your filesystem as an old printed world atlas. Folders become continents, nations and islands sized by bytes, files become cities, free space is the sea, and recently modified data rises into mountains.
 
-A Rust core (`src-tauri/src`) scans the disk, builds the region tree and generates Voronoi-mesh terrain; a TypeScript/WebGL2 frontend (`src`) renders it inside a Tauri app.
+Hover a region for its path, size and age, click to zoom in, and ⌘-click (Ctrl-click on Windows) to reveal it in Finder or Explorer.
 
-Develop with hot reload:
+## Download
+
+- **macOS** (Apple Silicon and Intel): [Disk-Atlas.dmg](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas.dmg). Drag the app to Applications and open it. macOS will refuse at first, since the app isn't notarised: go to System Settings → Privacy & Security and click Open Anyway. To scan the whole disk, also add the app under Privacy & Security → Full Disk Access.
+- **Windows**: [Disk-Atlas-setup.exe](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas-setup.exe). If SmartScreen warns, click More info → Run anyway. It installs for the current user, no admin needed.
+
+Reinstalling is the same as installing. All versions are on the [releases page](https://github.com/guillaume-jones/disk-atlas/releases).
+
+## Development
+
+A Rust core (`src-tauri/src`) scans the disk, builds the region tree and generates the terrain; a TypeScript/WebGL2 frontend (`src`) renders it inside a Tauri app.
 
 ```sh
 npm install
 npm run tauri dev
 ```
 
-To use Chrome devtools, run the same engine over HTTP and open `http://localhost:1420` (Vite proxies `/api`). The CLI only has your terminal's permissions, so protected folders like `~/Library/Containers` prompt or stall; for whole-disk scans, launch the installed app with its HTTP mirror instead, since it holds Full Disk Access:
+`cargo run --example atlas -- scan <folder>` (from `src-tauri`) prints a summary of a scan without any UI.
+
+Build and install locally on macOS:
 
 ```sh
-npm run dev
-(cd src-tauri && cargo run --bin atlas -- serve 7878)            # or:
-open --env DISK_ATLAS_HTTP=7878 ~/Applications/"Disk Atlas.app"
+npm run tauri build
+cp -R "src-tauri/target/release/bundle/macos/Disk Atlas.app" ~/Applications/
 ```
 
-`cargo run --bin atlas -- scan <folder>` prints a quick summary of a scan without any UI.
+Local Mac builds are signed with `bundle.macOS.signingIdentity` in `tauri.conf.json`. Full Disk Access is tied to that identity and the bundle ID, so rebuilds keep the grant. On Windows, `npm run tauri build` produces the installer in `src-tauri/target/release/bundle/nsis/`; it needs the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-Build and install:
+## Releasing
+
+Bump `version` in `src-tauri/tauri.conf.json`, then push a matching tag:
 
 ```sh
-npm run tauri build -- --debug        # drop --debug for an optimised build
-cp -R "src-tauri/target/debug/bundle/macos/Disk Atlas.app" ~/Applications/
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
-On Windows, build on a Windows machine with the [Tauri prerequisites](https://tauri.app/start/prerequisites/) (MSVC build tools; WebView2 ships with Windows 10/11). `npm run tauri build` then also writes a per-user NSIS installer to `src-tauri/target/release/bundle/nsis/`; run it to install or reinstall. The Windows scanner uses std's portable directory walk instead of macOS's bulk listing, so it's slower, counts hard-linked files once per link and doesn't detect mounted volumes inside the scanned folder. Folders the user can't read (some of `C:\Windows`) are skipped and count towards the unseen ice. Builds aren't code-signed, so SmartScreen warns on first run.
-
-The macOS bundle is signed with `bundle.macOS.signingIdentity` in `tauri.conf.json`. Full Disk Access is tied to that identity and the bundle ID, so rebuilds keep the grant; the app must stay unsandboxed. The icon source is `src-tauri/icons/source.svg`; render it to a 1024px PNG and run `npx tauri icon <png>`. Builds aren't notarised, so friends need to right-click → Open once and grant Full Disk Access themselves.
+GitHub Actions builds a universal macOS DMG and a Windows installer and attaches them to a release for that tag. CI builds are ad-hoc signed, so a downloaded app needs its own Full Disk Access grant.
