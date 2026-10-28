@@ -18,7 +18,7 @@ fn wait(engine: &Engine) -> Result<(), String> {
             Some("failed") => return Err(s["message"].to_string()),
             _ => {
                 eprint!("\r{} files, {} dirs, {}   ", s["files"], s["dirs"], gb(s["bytes"].as_u64().unwrap_or(0)));
-                std::thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(20));
             }
         }
     }
