@@ -57,6 +57,7 @@ export class TitlePage {
   open(closable: boolean) {
     this.page.hidden = false;
     this.closeButton.hidden = !closable;
+    this.customPath.focus();
   }
 
   private close() {

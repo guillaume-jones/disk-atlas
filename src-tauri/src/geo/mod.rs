@@ -441,7 +441,7 @@ pub fn build(root: Node, root_path: &str, space: VolumeSpace, now: f64) -> Geo {
     }
     b.push(
         Some(RegionId::WORLD),
-        NewRegion::all_dust(RegionKind::Ocean, "The Unclaimed Sea", "Free space", "", Stats::bytes(free)),
+        NewRegion::all_dust(RegionKind::Ocean, "The Unclaimed Sea", "Free space", "", Stats::bytes(capacity - scanned - unseen)),
     );
     b.geo
 }

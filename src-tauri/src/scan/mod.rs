@@ -15,7 +15,9 @@ use std::time::UNIX_EPOCH;
 
 /// Largest files kept as individual nodes per directory; the rest become dust.
 const KEEP_FILES: usize = 4;
-/// Anything smaller can never get its own region, so fold it into dust while scanning to save memory.
+/// Once a survey passes this many entries it's big enough that anything smaller than `MIN_NODE_BYTES` can never get
+/// its own region, so fold it into dust while scanning to save memory.
+const KEEP_ALL_ENTRIES: u64 = 100_000;
 const MIN_NODE_BYTES: u64 = 512 * 1024;
 /// Empty files still weigh one block towards a folder's average age.
 const MIN_FILE_WEIGHT: u64 = 4096;
@@ -107,9 +109,9 @@ impl Node {
         }
     }
 
-    fn absorb(&mut self, child: Node) {
+    fn absorb(&mut self, child: Node, min_bytes: u64) {
         self.total.add(&child.total);
-        if child.total.size < MIN_NODE_BYTES {
+        if child.total.size < min_bytes {
             self.dust.add(&child.total);
         } else {
             self.children.push(child);
@@ -242,16 +244,18 @@ impl Walk<'_> {
                 child
             })
             .collect();
+        let entries = self.progress.files.load(Relaxed) + self.progress.dirs.load(Relaxed);
+        let min_bytes = if entries < KEEP_ALL_ENTRIES { 0 } else { MIN_NODE_BYTES };
         files.sort_by_key(|f| Reverse(f.total.size));
         for (rank, file) in files.into_iter().enumerate() {
             if rank < KEEP_FILES {
-                node.absorb(file);
+                node.absorb(file, min_bytes);
             } else {
                 node.absorb_dust(&file.total);
             }
         }
         for child in subdirs {
-            node.absorb(child);
+            node.absorb(child, min_bytes);
         }
         node
     }
