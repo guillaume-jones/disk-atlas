@@ -332,6 +332,26 @@ button {
   color: rgba(42, 31, 22, 0.45);
 }
 
+#access {
+  margin: 24px 0 0;
+  font-size: 17px;
+}
+
+#access p {
+  margin: 0 0 12px;
+  font-style: italic;
+}
+
+#access button {
+  margin: 0 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+#access button:hover {
+  color: #7a2a1a;
+}
+
 #progress {
   margin: 28px 0 0;
   font-style: italic;

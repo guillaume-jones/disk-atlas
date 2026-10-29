@@ -54,6 +54,9 @@ fn handle(engine: &Arc<Engine>, method: &Method, url: &str) -> Result<Reply, Htt
     match (method, path) {
         (_, "/api/roots") => json(&engine::roots()),
         (_, "/api/status") => json(&engine.status()),
+        (_, "/api/access") => json(&engine::needs_full_disk_access(
+            &param(query, "root").ok_or(HttpError::BadParam("root"))?,
+        )),
         (Method::Post, "/api/scan") => {
             engine.start(param(query, "root").ok_or(HttpError::BadParam("root"))?)?;
             Ok(Reply::Json(b"{}".to_vec()))

@@ -49,7 +49,7 @@ const POLAR: &[&str] = &[
     "PerfLogs",
 ];
 /// macOS's writable data volume, surveyed instead of `/` when it exists.
-const DATA_VOLUME: &str = "/System/Volumes/Data";
+pub const DATA_VOLUME: &str = "/System/Volumes/Data";
 
 /// How payloads spell "no region": the world's parent, cells outside a patch, a tile's root.
 pub const NO_REGION: u32 = u32::MAX;

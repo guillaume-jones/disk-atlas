@@ -8,7 +8,7 @@ mod rng;
 mod scan;
 mod world;
 
-pub use engine::{Engine, Error, Phase, Roots, Status, roots};
+pub use engine::{Engine, Error, Phase, Roots, Status, needs_full_disk_access, roots};
 pub use geo::{Geo, Region, RegionId, RegionKind};
 pub use world::TileKey;
 
@@ -54,6 +54,11 @@ fn scan_roots() -> Roots {
     roots()
 }
 
+#[tauri::command]
+fn full_disk_access_needed(root: String) -> bool {
+    needs_full_disk_access(&root)
+}
+
 /// Runs the app.
 ///
 /// # Panics
@@ -72,7 +77,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(engine)
-        .invoke_handler(tauri::generate_handler![start_scan, scan_status, world, patch, tile, scan_roots])
+        .invoke_handler(tauri::generate_handler![
+            start_scan, scan_status, world, patch, tile, scan_roots, full_disk_access_needed
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

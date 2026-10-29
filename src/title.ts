@@ -14,7 +14,9 @@ export class TitlePage {
   private readonly customPath = element("custom-path", HTMLInputElement);
   private readonly progress = element("progress", HTMLParagraphElement);
   private readonly error = element("error", HTMLParagraphElement);
+  private readonly access = element("access", HTMLDivElement);
   private roots: Roots = { home: "", disk: "" };
+  private pendingRoot = "";
 
   constructor(private readonly onReady: () => Promise<void>) {
     for (const button of this.page.querySelectorAll<HTMLButtonElement>("button[data-root]")) {
@@ -28,6 +30,12 @@ export class TitlePage {
       if (path) this.scan(path.startsWith("~") ? this.roots.home + path.slice(1) : path);
     });
     this.closeButton.addEventListener("click", () => this.close());
+    element("access-open", HTMLButtonElement).addEventListener("click", () => {
+      api.openFullDiskAccessSettings().catch((error: unknown) => this.showError(error));
+    });
+    element("access-skip", HTMLButtonElement).addEventListener("click", () =>
+      this.scan(this.pendingRoot, true),
+    );
   }
 
   get home(): string {
@@ -55,10 +63,17 @@ export class TitlePage {
     this.page.hidden = true;
   }
 
-  private async scan(root: string) {
+  private async scan(root: string, skipAccessCheck = false) {
     this.error.hidden = true;
+    this.access.hidden = true;
     this.setChoicesEnabled(false);
     try {
+      if (!skipAccessCheck && (await api.needsFullDiskAccess(root))) {
+        this.pendingRoot = root;
+        this.access.hidden = false;
+        this.setChoicesEnabled(true);
+        return;
+      }
       await api.startScan(root);
       await this.follow(await api.status());
     } catch (error) {

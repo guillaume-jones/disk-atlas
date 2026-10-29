@@ -7,7 +7,7 @@ use serde::{Serialize, Serializer};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -72,13 +72,27 @@ pub struct Roots {
 pub fn roots() -> Roots {
     let disk = if cfg!(windows) {
         "C:\\"
-    } else if Path::new("/System/Volumes/Data").exists() {
-        "/System/Volumes/Data"
+    } else if Path::new(geo::DATA_VOLUME).exists() {
+        geo::DATA_VOLUME
     } else {
         "/"
     };
     let home = std::env::home_dir().map_or_else(String::new, |h| h.to_string_lossy().into_owned());
     Roots { home, disk }
+}
+
+/// Only Full Disk Access opens the system's own privacy database.
+const PRIVACY_DATABASE: &str = "/Library/Application Support/com.apple.TCC/TCC.db";
+
+/// Whether surveying `root` would reach `~/Library` (Mail, Messages, Safari, …) on a Mac that hasn't granted Full
+/// Disk Access. Always false elsewhere.
+pub fn needs_full_disk_access(root: &str) -> bool {
+    let library = std::env::home_dir().map_or_else(PathBuf::new, |home| home.join("Library"));
+    let root = Path::new(root);
+    let reaches_library = root == Path::new(geo::DATA_VOLUME) || library.starts_with(root) || root.starts_with(&library);
+    cfg!(target_os = "macos")
+        && reaches_library
+        && std::fs::File::open(PRIVACY_DATABASE).is_err_and(|e| e.kind() == io::ErrorKind::PermissionDenied)
 }
 
 #[derive(Default)]

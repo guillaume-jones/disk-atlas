@@ -145,6 +145,20 @@ export async function roots(): Promise<Roots> {
   return { home: parse.string(fields.home), disk: parse.string(fields.disk) };
 }
 
+export async function needsFullDiskAccess(root: string): Promise<boolean> {
+  return inTauri
+    ? invoke<boolean>("full_disk_access_needed", { root })
+    : (await http(`access?root=${encodeURIComponent(root)}`)).json();
+}
+
+const FULL_DISK_ACCESS_SETTINGS =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+export async function openFullDiskAccessSettings(): Promise<void> {
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  await openUrl(FULL_DISK_ACCESS_SETTINGS);
+}
+
 export async function world(): Promise<{ survey: SurveyMeta; patch: Patch }> {
   const { patch, world } = decode(await binary("world", {}, "world"));
   return { survey: parseSurvey(world), patch };

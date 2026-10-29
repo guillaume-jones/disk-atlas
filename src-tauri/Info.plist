@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Disk Atlas needs permission to scan this folder for the map.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Disk Atlas needs permission to scan this folder for the map.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Disk Atlas needs permission to scan this folder for the map.</string>
+  <key>NSRemovableVolumesUsageDescription</key>
+  <string>Disk Atlas needs permission to scan this folder for the map.</string>
+  <key>NSNetworkVolumesUsageDescription</key>
+  <string>Disk Atlas needs permission to scan this folder for the map.</string>
+</dict>
+</plist>
