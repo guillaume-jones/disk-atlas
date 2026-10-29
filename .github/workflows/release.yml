@@ -34,20 +34,27 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Trust the signing certificate
+      # Tauri's own APPLE_CERTIFICATE import only accepts Apple-issued certificate names, so import and trust it here.
+      - name: Install the signing certificate
         if: runner.os == 'macOS'
         run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$keychain"
+          security set-keychain-settings -t 3600 -u "$keychain"
+          security unlock-keychain -p ci "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain
           /usr/bin/openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" -clcerts -nokeys -passin env:APPLE_CERTIFICATE_PASSWORD -out "$RUNNER_TEMP/cert.pem"
           sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
+          security find-identity -v -p codesigning | grep "Disk Atlas Release"
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: Disk Atlas Release
         with:
           tagName: ${{ github.ref_name }}
