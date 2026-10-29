@@ -2,9 +2,9 @@
 
 A disk usage visualizer for macOS and Windows that draws your filesystem as an old printed world atlas.
 
-Folders become continents, nations and islands sized by bytes, files become cities, free space is the sea, and recently modified data rises into mountains.
+![Disk Atlas map of my Mac](docs/screenshot.jpeg)
 
-Hover a region for its path, size and age, click to zoom in, and ⌘-click (Ctrl-click on Windows) to reveal it in Finder or Explorer.
+Folders become continents, islands and nations. Area is proportional to file size, population to file count and more recent data is at higher elevation.
 
 ## Direct Download
 
@@ -24,7 +24,12 @@ Then a TypeScript/WebGL2 frontend (`src`) renders it inside a Tauri app.
 
 ### Install
 
-You need [Node.js](https://nodejs.org) 20.19 or newer, [Rust](https://rustup.rs) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) (Xcode Command Line Tools on macOS, MSVC Build Tools on Windows). Then:
+You will need:
+- [Node.js](https://nodejs.org) 20.19 or newer
+- [Rust](https://rustup.rs) 
+- [Tauri prerequisites](https://tauri.app/start/prerequisites/) (Xcode Command Line Tools on macOS, MSVC Build Tools on Windows). 
+
+Then:
 
 ```sh
 npm install
@@ -70,14 +75,4 @@ To install it instead, run the installer in `src-tauri\target\release\bundle\nsi
 ### Release
 
 Bump `version` in `src-tauri/tauri.conf.json`, then release on GitHub with a matching version tag.
-Actions take care of building the Apple & Windows bundles.
-
-The Mac build is signed with a self-signed certificate from the `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` repository secrets. Every release then has the same identity, so users keep their Full Disk Access grant across updates. To create a new one (it expires after 10 years):
-
-```sh
-openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -subj "/CN=Disk Atlas Release" \
-  -addext keyUsage=critical,digitalSignature -addext extendedKeyUsage=critical,codeSigning -addext basicConstraints=critical,CA:false
-openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -out cert.p12 -passout pass:<password>
-base64 -i cert.p12 | gh secret set APPLE_CERTIFICATE
-gh secret set APPLE_CERTIFICATE_PASSWORD --body <password>
-```
+Actions take care of building and signing for Apple & Windows.
