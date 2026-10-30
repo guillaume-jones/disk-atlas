@@ -17,7 +17,7 @@ const KINDS = [
 export type Kind = (typeof KINDS)[number];
 
 const PHASES = ["idle", "scanning", "mapping", "ready", "failed"] as const;
-export type Phase = (typeof PHASES)[number];
+type Phase = (typeof PHASES)[number];
 
 /** Region id meaning "none": the world's parent, and mesh cells outside every region. */
 export const NO_REGION = 0xffffffff;
@@ -27,6 +27,11 @@ export interface Region {
   parent: number;
   depth: number;
   kind: Kind;
+  /** The folder's distinctive word, from which themes build names. */
+  word: string | null;
+  /** Stable per region, seeding its themed name. */
+  hash: number;
+  /** Set by `nameRegions`. */
   name: string;
   /** Shown instead of the path for regions that aren't folders, e.g. the sea of free space. */
   label: string;
@@ -34,6 +39,8 @@ export interface Region {
   size: number;
   /** Unix seconds; 0 when unknown. */
   mtime: number;
+  settled: boolean;
+  /** Set by `nameRegions`. */
   city: string | null;
   children: number[];
 }
@@ -54,7 +61,6 @@ export interface Label {
   y: number;
   radius: number;
   bounds: Rect;
-  cells: number;
 }
 
 export interface City {
@@ -183,12 +189,15 @@ function parseRegion(value: unknown): Region {
     parent: parse.number(fields.parent),
     depth: parse.number(fields.depth),
     kind: parse.literal(fields.kind, KINDS),
-    name: parse.string(fields.name),
+    word: parse.nullable(fields.word, parse.string),
+    hash: parse.number(fields.hash),
+    name: "",
     label: parse.string(fields.label),
     path: parse.string(fields.path),
     size: parse.number(fields.size),
     mtime: parse.number(fields.mtime),
-    city: parse.nullable(fields.city, parse.string),
+    settled: parse.boolean(fields.settled),
+    city: null,
     children: parse.array(fields.children, parse.number),
   };
 }
@@ -205,8 +214,8 @@ function parseSurvey(value: unknown): SurveyMeta {
 }
 
 function parseLabel(value: unknown): Label {
-  const [id, x, y, radius, x0, y0, x1, y1, cells] = parse.numbers(value, 9);
-  return { id, x, y, radius, bounds: { x0, y0, x1, y1 }, cells };
+  const [id, x, y, radius, x0, y0, x1, y1] = parse.numbers(value, 9);
+  return { id, x, y, radius, bounds: { x0, y0, x1, y1 } };
 }
 
 function parseCity(value: unknown): City {
@@ -216,7 +225,8 @@ function parseCity(value: unknown): City {
 
 const MAGIC = "ATL1";
 const PREAMBLE_BYTES = 8;
-const SEGMENT_FLOATS = 5;
+/** Floats per border or river segment. */
+export const SEGMENT_FLOATS = 5;
 
 /** Layout: "ATL1", u32 JSON length, JSON header padded to 4 bytes, then the typed arrays in `Patch` order. */
 function decode(buffer: ArrayBuffer): { patch: Patch; world: unknown } {

@@ -1,26 +1,27 @@
 # Disk Atlas
 
-A disk usage visualizer for macOS and Windows that draws your filesystem as an old printed world atlas.
+A disk usage visualizer for macOS and Windows that draws your filesystem as a realstic-ish world atlas.
 
-![Disk Atlas map of my Mac](docs/screenshot.jpeg)
+![Disk Atlas map of my Mac, 1900](docs/1900-full.jpeg)
 
 Folders become continents, islands and nations. Area is proportional to file size, population to file count and more recent data is at higher elevation.
 
-## Direct Download
+![Disk Atlas map of my home dir, today](docs/today-user.jpeg)
 
-These are built on GitHub on each release:
+## Downloads
 
-- **macOS** (Apple Silicon and Intel): [Disk-Atlas.dmg](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas.dmg).
+- [**macOS**](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas.dmg):
   - Drag the app to Applications and open it.
   - macOS will refuse at first, since the app isn't notarised: go to System Settings → Privacy & Security and click Open Anyway.
   - To scan the home folder or whole disk, Disk Atlas asks for Full Disk Access and opens the settings page. Switch it on, then reopen the app.
-- **Windows**: [Disk-Atlas-setup.exe](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas-setup.exe).
+- [**Windows**](https://github.com/guillaume-jones/disk-atlas/releases/latest/download/Disk-Atlas-setup.exe):
   - If SmartScreen warns, click More info → Run anyway.
 
 ## Development
 
 The app uses a Rust core (`src-tauri/src`) to scan the disk and build the terrain.
 Then a TypeScript/WebGL2 frontend (`src`) renders it inside a Tauri app.
+
 
 ### Install
 
@@ -50,6 +51,14 @@ Run just a scan without the UI:
 ```sh
 cargo run --example atlas -- scan <folder>
 ```
+
+### Themes
+
+The geometry is the same in every render, but terrain color, ink colors, typography, city markers, table, page styling and the vocabulary used to name places can be modified.
+
+To add a theme, create a `Theme` (`src/theme.ts`) in `src/themes` and register it in `src/themes/index.ts`. 
+
+Default themes: 1900s Atlas, modern Google Maps.
 
 ### Build
 

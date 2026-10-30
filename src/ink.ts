@@ -1,28 +1,17 @@
 import type { Camera } from "./camera";
 import { clamp, type Rect } from "./geometry";
 import type { Layer, Layers } from "./layers";
-import { SHEET, TYPEFACE, WORLD, WORLD_HEIGHT, WORLD_WIDTH } from "./layout";
+import { SHEET, WORLD, WORLD_HEIGHT, WORLD_WIDTH } from "./layout";
 import { drawPlaces } from "./places";
 import type { Survey } from "./survey";
+import type { BorderStyle, Theme } from "./theme";
 
 const DEGREES_PER_WORLD_UNIT = 180;
 const GRATICULE_DEGREES = 30;
 /** Strokes within this many CSS px outside the viewport still get drawn, so line caps don't pop. */
 const CULL_MARGIN_PX = 8;
-const GRATICULE_INK = "rgba(20,20,30,0.3)";
-const RIVER_INK = "rgba(52,84,110,0.85)";
-/** Border styles by level: continent, nation, province, then everything finer. */
-const BORDER_STYLES = [
-  { color: "rgba(40,28,20,0.85)", width: 1.5, dash: [] },
-  { color: "rgba(122,36,24,0.75)", width: 1.3, dash: [7, 2.5, 1.5, 2.5] },
-  { color: "rgba(122,52,36,0.6)", width: 1, dash: [3, 2.5] },
-  { color: "rgba(90,60,45,0.5)", width: 0.8, dash: [1, 2.5] },
-];
 const DEGREE_FONT_PX = 8.5;
 const FRAME_RULE_MAX_PX = 4;
-
-/** Deepest border and name level shown at a zoom; fractional, so the next level fades in. */
-const detailLevel = (zoom: number) => 2 + Math.log2(Math.max(zoom, 1)) * 0.9;
 
 /** The 2D overlay printed over the terrain: graticule, rivers, borders, frame and names. */
 export class Ink {
@@ -40,11 +29,19 @@ export class Ink {
   }
 
   /** `visible` runs coarse to fine. */
-  draw(camera: Camera, survey: Survey, layers: Layers, visible: readonly Layer[]) {
+  draw(
+    camera: Camera,
+    survey: Survey,
+    layers: Layers,
+    visible: readonly Layer[],
+    theme: Theme,
+  ) {
     const { ctx } = this;
+    const { ink, ui } = theme;
     const { dpr, scale, zoom } = camera;
     const px = 1 / scale;
-    const level = detailLevel(zoom);
+    // Deepest border and name level shown; fractional, so the next level fades in.
+    const level = 2 + Math.log2(Math.max(zoom, 1)) * 0.9;
     const view = camera.visibleWorld(CULL_MARGIN_PX);
     this.clear(camera);
 
@@ -62,26 +59,27 @@ export class Ink {
     ctx.beginPath();
     ctx.rect(WORLD.x0, WORLD.y0, WORLD_WIDTH, WORLD_HEIGHT);
     ctx.clip();
-    this.drawGraticule(px);
-    this.drawRivers(visible, view, zoom, px);
-    this.drawBorders(visible, view, level, px);
+    if (ink.graticule) this.drawGraticule(ink.graticule, px);
+    this.drawRivers(ink.river, visible, view, zoom, px);
+    this.drawBorders(ink.borders, visible, view, level, px);
     ctx.restore();
-    this.drawFrame(camera);
+    if (ink.frame) this.drawFrame(ink.frame, ui["text-font"], camera);
 
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const map = camera.mapOnScreen();
     ctx.save();
     ctx.beginPath();
     ctx.rect(map.x0, map.y0, map.x1 - map.x0, map.y1 - map.y0);
     ctx.clip();
-    drawPlaces(ctx, camera, survey, layers, level, map);
+    drawPlaces(ctx, camera, survey, layers, level, map, theme);
     ctx.restore();
   }
 
-  private drawGraticule(px: number) {
+  private drawGraticule({ color, width }: NonNullable<Theme["ink"]["graticule"]>, px: number) {
     const { ctx } = this;
     const step = GRATICULE_DEGREES / DEGREES_PER_WORLD_UNIT;
-    ctx.strokeStyle = GRATICULE_INK;
-    ctx.lineWidth = 0.8 * px;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * px;
     ctx.beginPath();
     for (let x = WORLD.x0 + step; x < WORLD.x1 - step / 2; x += step) {
       ctx.moveTo(x, WORLD.y0);
@@ -94,46 +92,66 @@ export class Ink {
     ctx.stroke();
   }
 
-  private drawRivers(visible: readonly Layer[], view: Rect, zoom: number, px: number) {
+  private drawRivers(
+    color: string,
+    visible: readonly Layer[],
+    view: Rect,
+    zoom: number,
+    px: number,
+  ) {
     const { ctx } = this;
     const minMagnitude = Math.max(1, 3.5 / zoom);
     const zoomWidening = Math.min(2.2, zoom ** 0.3);
-    ctx.strokeStyle = RIVER_INK;
+    ctx.strokeStyle = color;
     for (const layer of visible) {
       for (const [magnitude, strokes] of layer.rivers) {
         if (magnitude < minMagnitude) continue;
         ctx.lineWidth = Math.min(3.4, 0.45 + 0.3 * magnitude) * zoomWidening * px;
-        ctx.stroke(strokes.visible(view));
+        ctx.stroke(strokes.visible(view).path);
       }
     }
   }
 
-  private drawBorders(visible: readonly Layer[], view: Rect, level: number, px: number) {
+  private drawBorders(
+    styles: readonly BorderStyle[],
+    visible: readonly Layer[],
+    view: Rect,
+    level: number,
+    px: number,
+  ) {
     const { ctx } = this;
     for (const layer of visible) {
       for (const [borderLevel, strokes] of layer.borders) {
         const fade = clamp(level + 1 - borderLevel, 0, 1);
-        const style = BORDER_STYLES[Math.min(borderLevel, BORDER_STYLES.length) - 1];
+        const style = styles[Math.min(borderLevel, styles.length) - 1];
         if (fade <= 0 || !style) continue;
         ctx.globalAlpha = fade;
         ctx.strokeStyle = style.color;
         ctx.lineWidth = style.width * px;
         ctx.setLineDash(style.dash.map((length) => length * px));
-        ctx.stroke(strokes.visible(view));
+        const { path, runs } = strokes.visible(view);
+        if (style.dash.length === 0) ctx.stroke(path);
+        else {
+          for (const run of runs) {
+            ctx.lineDashOffset = run.offset;
+            ctx.stroke(run.path);
+          }
+        }
       }
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
   }
 
   /** Thin inner rule, a margin carrying degree numbers, thin outer rule; all magnify with the map. */
-  private drawFrame(camera: Camera) {
+  private drawFrame(color: string, typeface: string, camera: Camera) {
     const { ctx } = this;
     const { zoom, scale, dpr } = camera;
     const px = 1 / scale;
     const marginY = SHEET.frameY * zoom;
     const marginX = SHEET.frameX * zoom;
-    ctx.strokeStyle = "#000";
+    ctx.strokeStyle = color;
     ctx.lineWidth = Math.min(zoom, FRAME_RULE_MAX_PX) * px;
     ctx.strokeRect(WORLD.x0, WORLD.y0, WORLD_WIDTH, WORLD_HEIGHT);
     ctx.strokeRect(
@@ -144,8 +162,8 @@ export class Ink {
     );
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#000";
-    ctx.font = `${DEGREE_FONT_PX * zoom}px ${TYPEFACE}`;
+    ctx.fillStyle = color;
+    ctx.font = `${DEGREE_FONT_PX * zoom}px ${typeface}`;
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
     const map = camera.mapOnScreen();

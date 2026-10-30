@@ -10,7 +10,7 @@ const WHEEL_ZOOM_RATE = 0.0018;
 const MOUSE_WHEEL_MIN_STEP = 40;
 const KEY_ZOOM = 1.6;
 
-export interface InputHandlers {
+interface InputHandlers {
   /** Whether a map is showing; keyboard shortcuts are ignored otherwise. */
   isActive(): boolean;
   hover(point: Point | null): void;

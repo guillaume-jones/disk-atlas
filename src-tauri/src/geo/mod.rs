@@ -1,10 +1,9 @@
 //! The region tree: the scanned folder tree pruned to what can be drawn, classified into continents, islands, ice,
-//! isles and sea, and named.
+//! isles and sea. Each region carries the word and hash the frontend names it from.
 mod names;
 
-use crate::rng::{Rng, hash_str};
+use crate::rng::hash_str;
 use crate::scan::{Kind, Node, Stats, VolumeSpace};
-use names::{Gazetteer, Lang};
 use serde::{Serialize, Serializer};
 use std::cmp::Reverse;
 use std::path::{MAIN_SEPARATOR, Path};
@@ -54,9 +53,6 @@ pub const DATA_VOLUME: &str = "/System/Volumes/Data";
 /// How payloads spell "no region": the world's parent, cells outside a patch, a tile's root.
 pub const NO_REGION: u32 = u32::MAX;
 
-const WORLD_NAME: &str = "The Known World";
-const ICE_NAME: &str = "The System Ice";
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
 #[serde(transparent)]
 pub struct RegionId(u32);
@@ -103,7 +99,10 @@ pub struct Region {
     pub parent: Option<RegionId>,
     pub depth: u8,
     pub kind: RegionKind,
-    pub name: String,
+    /// The folder's distinctive word, or its nearest ancestor's; `None` when the name must be invented.
+    pub word: Option<String>,
+    /// Stable per region, seeding its themed name.
+    pub hash: u32,
     /// The real folder name shown under the place name.
     pub label: String,
     pub path: String,
@@ -112,7 +111,8 @@ pub struct Region {
     pub mtime: f64,
     #[serde(skip)]
     pub dust: Stats,
-    pub city: Option<String>,
+    /// Whether the region has a city.
+    pub settled: bool,
     pub children: Vec<RegionId>,
 }
 
@@ -181,7 +181,7 @@ impl Geo {
 
 struct NewRegion {
     kind: RegionKind,
-    name: String,
+    word: Option<String>,
     label: String,
     path: String,
     total: Stats,
@@ -190,10 +190,10 @@ struct NewRegion {
 
 impl NewRegion {
     /// A fixed landmark whose content is drawn by its children.
-    fn new(kind: RegionKind, name: &str, label: &str, path: &str, total: Stats) -> Self {
+    fn new(kind: RegionKind, label: &str, path: &str, total: Stats) -> Self {
         NewRegion {
             kind,
-            name: name.into(),
+            word: None,
             label: label.into(),
             path: path.into(),
             total,
@@ -202,17 +202,16 @@ impl NewRegion {
     }
 
     /// A fixed landmark that is nothing but dust: sea, sealed ice, loose files.
-    fn all_dust(kind: RegionKind, name: &str, label: &str, path: &str, total: Stats) -> Self {
+    fn all_dust(kind: RegionKind, label: &str, path: &str, total: Stats) -> Self {
         NewRegion {
             dust: total,
-            ..NewRegion::new(kind, name, label, path, total)
+            ..NewRegion::new(kind, label, path, total)
         }
     }
 }
 
 struct Builder {
     geo: Geo,
-    names: Gazetteer,
     min_size: u64,
 }
 
@@ -225,14 +224,15 @@ impl Builder {
             parent,
             depth,
             kind: new.kind,
-            name: new.name,
+            word: new.word,
+            hash: hash_str(&new.path) as u32,
             label: new.label,
             path: new.path,
             size: new.total.size,
             count: new.total.count,
             mtime: new.total.mtime(),
             dust: new.dust,
-            city: None,
+            settled: false,
             children: Vec::new(),
         });
         if let Some(parent) = parent {
@@ -243,7 +243,7 @@ impl Builder {
 
     /// Adds `node` and its drawable descendants under `parent`. `inherited` names regions whose folders have no
     /// meaningful word of their own.
-    fn add_node(&mut self, node: Node, path: String, parent: RegionId, kind: Option<RegionKind>, lang: Lang, inherited: Option<&str>) {
+    fn add_node(&mut self, node: Node, path: String, parent: RegionId, kind: Option<RegionKind>, inherited: Option<&str>) {
         let outer = node.total;
         let mut chain = vec![node.name.clone()];
         let mut node = node;
@@ -274,28 +274,20 @@ impl Builder {
         let keep = children.iter().take(MAX_CHILDREN).take_while(|c| c.total.size >= cut).count();
         children.drain(keep..).for_each(|c| dust.add(&c.total));
 
-        let mut rng = Rng::new(hash_str(&path));
         let word = names::distinctive(&chain).or_else(|| inherited.map(str::to_owned));
-        let depth = self.geo.region(parent).depth + 1;
         let polar = self.geo.top(parent).kind == RegionKind::Polar;
-        let name = self
-            .names
-            .claim(word.as_deref(), names::region_patterns(kind, depth, polar), lang, &mut rng);
         let label = names::informative(&chain);
         let id = self.push(
             Some(parent),
-            NewRegion { kind, name, label, path: path.clone(), total: outer, dust },
+            NewRegion { kind, word: word.clone(), label, path: path.clone(), total: outer, dust },
         );
         for child in children {
             let child_path = join(&path, &child.name);
-            self.add_node(child, child_path, id, None, lang, word.as_deref());
+            self.add_node(child, child_path, id, None, word.as_deref());
         }
         let is_leaf = self.geo.region(id).children.is_empty();
         let population = if is_leaf { outer.count } else { dust.count };
-        if population >= if polar { MIN_OUTPOST_FILES } else { MIN_CITY_FILES } {
-            let city = self.names.claim(word.as_deref(), names::city_patterns(polar), lang, &mut rng);
-            self.geo.regions[id.index()].city = Some(city);
-        }
+        self.geo.regions[id.index()].settled = population >= if polar { MIN_OUTPOST_FILES } else { MIN_CITY_FILES };
     }
 }
 
@@ -348,7 +340,6 @@ fn top_level(root: Node, root_path: &str, whole_disk: bool) -> (Vec<TopLevel>, V
 impl Builder {
     /// Continents and islands; items too small for either join `loose`.
     fn add_land(&mut self, landmasses: Vec<TopLevel>, land_total: u64, loose: &mut Stats) {
-        let mut langs: Vec<Lang> = Vec::new();
         let mut islands = 0;
         for item in landmasses {
             let share = item.node.total.size as f64 / land_total.max(1) as f64;
@@ -361,15 +352,7 @@ impl Builder {
                 loose.add(&item.node.total);
                 continue;
             };
-            // Each continent speaks its own language; islands borrow one.
-            let seed = hash_str(&item.path);
-            let lang = if kind == RegionKind::Continent || langs.is_empty() {
-                langs.push(Lang::new(seed));
-                langs[langs.len() - 1]
-            } else {
-                langs[seed as usize % langs.len()]
-            };
-            self.add_node(item.node, item.path, RegionId::WORLD, Some(kind), lang, None);
+            self.add_node(item.node, item.path, RegionId::WORLD, Some(kind), None);
         }
     }
 
@@ -379,20 +362,18 @@ impl Builder {
         for item in &polar {
             total.add(&item.node.total);
         }
-        self.names.reserve(ICE_NAME);
         let ice = self.push(
             Some(RegionId::WORLD),
-            NewRegion::new(RegionKind::Polar, ICE_NAME, "System files", root_path, total),
+            NewRegion::new(RegionKind::Polar, "System files", root_path, total),
         );
-        let lang = Lang::new(hash_str("polar"));
         for item in polar {
-            self.add_node(item.node, item.path, ice, None, lang, None);
+            self.add_node(item.node, item.path, ice, None, None);
         }
         if unseen > 0 {
             let label = "Sealed system volume, snapshots & unreadable folders";
             self.push(
                 Some(ice),
-                NewRegion::all_dust(RegionKind::Unseen, "The Unseen Ice", label, "", Stats::bytes(unseen)),
+                NewRegion::all_dust(RegionKind::Unseen, label, "", Stats::bytes(unseen)),
             );
         }
     }
@@ -422,12 +403,11 @@ pub fn build(root: Node, root_path: &str, space: VolumeSpace, now: f64) -> Geo {
     };
     let mut b = Builder {
         geo,
-        names: Gazetteer::default(),
         min_size: (capacity as f64 * MIN_REGION_SHARE) as u64,
     };
     b.push(
         None,
-        NewRegion::new(RegionKind::World, WORLD_NAME, root_path, root_path, Stats::bytes(capacity)),
+        NewRegion::new(RegionKind::World, root_path, root_path, Stats::bytes(capacity)),
     );
     b.add_land(land, land_total, &mut loose);
     if !polar.is_empty() || unseen > 0 {
@@ -436,12 +416,12 @@ pub fn build(root: Node, root_path: &str, space: VolumeSpace, now: f64) -> Geo {
     if loose.size > 0 {
         b.push(
             Some(RegionId::WORLD),
-            NewRegion::all_dust(RegionKind::Isles, "The Scattered Isles", "Small top-level items", root_path, loose),
+            NewRegion::all_dust(RegionKind::Isles, "Small top-level items", root_path, loose),
         );
     }
     b.push(
         Some(RegionId::WORLD),
-        NewRegion::all_dust(RegionKind::Ocean, "The Unclaimed Sea", "Free space", "", Stats::bytes(capacity - scanned - unseen)),
+        NewRegion::all_dust(RegionKind::Ocean, "Free space", "", Stats::bytes(capacity - scanned - unseen)),
     );
     b.geo
 }

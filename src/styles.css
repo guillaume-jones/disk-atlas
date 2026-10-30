@@ -4,15 +4,11 @@
 @import "@fontsource/old-standard-tt/400.css";
 @import "@fontsource/old-standard-tt/400-italic.css";
 @import "@fontsource/old-standard-tt/700.css";
+@import "@fontsource/roboto/400.css";
+@import "@fontsource/roboto/700.css";
 
 :root {
-  --ink: #2a1f16;
-  --ink-soft: #6e5a45;
-  --paper: #efe5cc;
-  --fell: "IM Fell English", Georgia, serif;
-  --fell-sc: "IM Fell English SC", Georgia, serif;
-  --old: "Old Standard TT", Georgia, serif;
-  font-family: var(--fell);
+  font-family: var(--body-font);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -31,7 +27,7 @@ body {
 }
 
 body {
-  background-color: #4a2f1c;
+  background-color: var(--table);
   background-size: 1024px 1024px;
 }
 
@@ -40,7 +36,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(10, 5, 2, 0.55) 100%);
+  background: radial-gradient(ellipse at 50% 45%, transparent 35%, var(--vignette) 100%);
 }
 
 [hidden] {
@@ -59,14 +55,14 @@ canvas {
 }
 
 /* Paper with a faint fibre texture. */
-.slip,
+#toast,
 #sheet,
 .book {
   background-color: var(--paper);
   background-image:
-    radial-gradient(ellipse at 30% 20%, rgba(255, 250, 235, 0.5), transparent 60%),
-    radial-gradient(ellipse at 80% 90%, rgba(150, 110, 60, 0.12), transparent 55%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.25 0 0 0 0 0.12 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    radial-gradient(ellipse at 30% 20%, var(--paper-light), transparent 60%),
+    radial-gradient(ellipse at 80% 90%, var(--paper-dark), transparent 55%),
+    var(--paper-fibre);
 }
 
 #sheet {
@@ -85,57 +81,76 @@ button {
   cursor: pointer;
 }
 
-.slip {
-  position: fixed;
-  z-index: 2;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
-}
-
-/* A printed Edwardian ticket: paper, double rule, pointing hand. */
-#rescan {
+#tickets {
   position: fixed;
   z-index: 2;
   top: 14px;
   left: 16px;
+  display: flex;
+  gap: 10px;
+}
+
+/* A printed ticket. */
+#rescan,
+#themes button {
   padding: 6px 14px 5px;
-  font: italic 15px var(--old);
-  color: #000;
+  font: italic 15px var(--text-font);
+  color: var(--print-ink);
+}
+
+#rescan,
+#themes {
   background: var(--paper);
-  border: 3px double #000;
+  border: var(--ticket-border);
+  border-radius: var(--corner-radius);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
 }
 
-#rescan span {
-  font-style: normal;
-  margin-right: 3px;
+#themes {
+  display: flex;
 }
 
-#rescan:hover {
-  background: #e6dab9;
+#themes button + button {
+  border-left: 1px solid var(--rule);
+}
+
+#themes button[aria-pressed="true"] {
+  background: var(--paper-hover);
+  font-weight: 700;
+}
+
+#rescan:hover,
+#themes button:hover {
+  background: var(--paper-hover);
 }
 
 #toast {
+  position: fixed;
+  z-index: 2;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
   top: 16px;
   right: 16px;
   padding: 7px 14px 6px;
-  font: italic 14px var(--old);
-  color: #000;
+  font: italic 14px var(--text-font);
+  color: var(--print-ink);
+  border-radius: var(--corner-radius);
 }
 
 /* Recency strip printed on the sheet below the map. */
 #legend {
   position: fixed;
   z-index: 1;
-  color: #000;
-  font-family: var(--old);
+  color: var(--print-ink);
+  font-family: var(--text-font);
   pointer-events: none;
 }
 
 #legend h2 {
   margin: 0 0 5px;
-  font: 700 11px var(--old);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font: 700 11px var(--text-font);
+  letter-spacing: var(--legend-letter-spacing);
+  text-transform: var(--heading-case);
   text-align: left;
 }
 
@@ -150,7 +165,7 @@ button {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid #000;
+  border: var(--key-border);
 }
 
 #key li {
@@ -166,15 +181,16 @@ button {
 }
 
 #key li + li {
-  border-left: 1px solid #000;
+  border-left: var(--key-border);
 }
 
 .area {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   width: 110px;
   gap: 6px;
-  font: italic 11px var(--old);
+  font: italic 11px var(--text-font);
   white-space: nowrap;
 }
 
@@ -190,7 +206,7 @@ button {
 
 #area-box {
   flex: none;
-  border: 1px solid #000;
+  border: 1px solid var(--print-ink);
 }
 
 /* The ruled note the viewer holds, describing whatever is under the cursor. */
@@ -201,13 +217,14 @@ button {
   bottom: 18px;
   width: 360px;
   padding: 12px 16px 12px 36px;
-  color: #000;
-  font-family: var(--old);
+  color: var(--print-ink);
+  font-family: var(--text-font);
   line-height: 20px;
+  border-radius: var(--corner-radius);
   background:
-    linear-gradient(90deg, transparent 25px, rgba(170, 60, 50, 0.4) 25px 26px, transparent 26px),
-    repeating-linear-gradient(transparent 0 19px, rgba(70, 100, 140, 0.18) 19px 20px),
-    #f4eedc;
+    linear-gradient(90deg, transparent 25px, var(--note-margin) 25px 26px, transparent 26px),
+    repeating-linear-gradient(transparent 0 19px, var(--note-lines) 19px 20px),
+    var(--note-paper);
   background-position: 0 2px;
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.3),
@@ -215,9 +232,9 @@ button {
 }
 
 #note-name {
-  font: 700 15px/20px var(--old);
+  font: 700 15px/20px var(--text-font);
   letter-spacing: 0.1em;
-  text-transform: uppercase;
+  text-transform: var(--heading-case);
 }
 
 #note-path {
@@ -226,7 +243,7 @@ button {
 }
 
 #note-facts {
-  font: italic 14px/20px var(--old);
+  font: italic 14px/20px var(--text-font);
 }
 
 /* Title page */
@@ -235,7 +252,7 @@ button {
   position: fixed;
   inset: 0;
   z-index: 3;
-  background: rgba(20, 10, 4, 0.35);
+  background: var(--title-backdrop);
   display: grid;
   place-items: center;
 }
@@ -245,6 +262,7 @@ button {
   width: min(520px, calc(100vw - 48px));
   padding: 64px 56px 52px;
   text-align: center;
+  border-radius: var(--corner-radius);
   box-shadow:
     inset 18px 0 30px -18px rgba(90, 60, 30, 0.35),
     0 2px 4px rgba(0, 0, 0, 0.35),
@@ -253,7 +271,7 @@ button {
 
 .book h1 {
   margin: 18px 0;
-  font: 46px/1.1 var(--fell-sc);
+  font: 46px/1.1 var(--display-font);
   letter-spacing: 0.06em;
   font-weight: 400;
 }
@@ -285,7 +303,7 @@ button {
 }
 
 .contents button:hover .title {
-  color: #7a2a1a;
+  color: var(--accent);
 }
 
 .contents button:disabled {
@@ -295,12 +313,12 @@ button {
 
 .num {
   width: 30px;
-  font-family: var(--fell-sc);
+  font-family: var(--display-font);
 }
 
 .leader {
   flex: 1;
-  border-bottom: 1px dotted rgba(42, 31, 22, 0.6);
+  border-bottom: 1px dotted var(--rule);
   transform: translateY(-5px);
 }
 
@@ -318,18 +336,18 @@ button {
 #custom input {
   flex: 1;
   padding: 0 0 2px;
-  font: italic 19px var(--fell);
+  font: italic 19px var(--body-font);
   color: var(--ink);
   background: transparent;
   border: none;
-  border-bottom: 1px dotted rgba(42, 31, 22, 0.6);
+  border-bottom: 1px dotted var(--rule);
   outline: none;
   user-select: text;
   -webkit-user-select: text;
 }
 
 #custom input::placeholder {
-  color: rgba(42, 31, 22, 0.45);
+  color: var(--ink-soft);
 }
 
 #access {
@@ -349,7 +367,7 @@ button {
 }
 
 #access button:hover {
-  color: #7a2a1a;
+  color: var(--accent);
 }
 
 #progress {
@@ -361,7 +379,7 @@ button {
 #error {
   margin: 24px 0 0;
   font-style: italic;
-  color: #7a2a1a;
+  color: var(--accent);
 }
 
 .close {

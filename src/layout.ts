@@ -22,5 +22,3 @@ export const SHEET = {
   /** Table left showing beside the paper when fitting. */
   fitBeside: 14,
 } as const;
-
-export const TYPEFACE = `"Old Standard TT", Georgia, serif`;

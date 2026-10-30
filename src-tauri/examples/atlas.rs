@@ -55,7 +55,7 @@ fn scan(root: String) -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  {:<10?} {:<26} {:>10}  {:>8} files  {kids} kids  label={:?} path={}",
             r.kind,
-            r.name,
+            r.word.as_deref().unwrap_or("-"),
             gb(r.size),
             r.count,
             r.label,
@@ -64,12 +64,12 @@ fn scan(root: String) -> Result<(), Box<dyn std::error::Error>> {
         for &k in r.children.iter().take(4) {
             let k = geo.region(k);
             println!(
-                "      {:<8?} {:<20} {:>10}  label={:?} city={:?}",
+                "      {:<8?} {:<20} {:>10}  label={:?} settled={}",
                 k.kind,
-                k.name,
+                k.word.as_deref().unwrap_or("-"),
                 gb(k.size),
                 k.label,
-                k.city
+                k.settled
             );
         }
     }
@@ -80,7 +80,7 @@ fn scan(root: String) -> Result<(), Box<dyn std::error::Error>> {
         let built = engine.patch(id.into())?;
         println!(
             "patch {id} ({}): {} in {:.2}s",
-            geo.region(id).name,
+            geo.region(id).label,
             built.summary,
             started.elapsed().as_secs_f64()
         );

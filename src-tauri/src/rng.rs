@@ -1,4 +1,4 @@
-//! Deterministic randomness: every generated name and shape is seeded from stable strings, so a survey always
+//! Deterministic randomness: every generated shape is seeded from stable strings, so a survey always
 //! draws the same map.
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -34,9 +34,5 @@ impl Rng {
     /// Uniform in [0, n), or 0 when n is 0.
     pub fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n.max(1) as u64) as usize
-    }
-
-    pub fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-        &items[self.below(items.len())]
     }
 }

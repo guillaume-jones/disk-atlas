@@ -1,7 +1,7 @@
 import * as api from "./api";
 import { NO_REGION, type City, type Label, type Patch } from "./api";
 import type { Camera } from "./camera";
-import { clamp, intersects, type Rect } from "./geometry";
+import { clamp, contains, intersects, type Rect } from "./geometry";
 import { buildStrokes, type StrokeGrid } from "./strokes";
 import type { Survey } from "./survey";
 import type { GLPatch, Terrain } from "./terrain";
@@ -32,7 +32,7 @@ export interface Layer {
 }
 
 /** An item kept from the finest patch that carried it. */
-export interface Finest<T> {
+interface Finest<T> {
   item: T;
   depth: number;
 }
@@ -67,7 +67,7 @@ class Requests<K> {
   }
 }
 
-export interface LayerEvents {
+interface LayerEvents {
   /** A layer was added or evicted. */
   onChange: () => void;
   onBusy: (busy: boolean) => void;
@@ -78,9 +78,9 @@ export interface LayerEvents {
  * then square detail tiles below it, plus the labels and cities they carry.
  */
 export class Layers {
-  readonly patches = new Map<number, Layer>();
+  private readonly patches = new Map<number, Layer>();
   /** In order of last use, oldest first. */
-  readonly tiles = new Map<string, Layer>();
+  private readonly tiles = new Map<string, Layer>();
   readonly labels = new Map<number, Finest<Label>>();
   readonly cities = new Map<number, Finest<City>>();
   /** Coarse to fine. */
@@ -102,6 +102,18 @@ export class Layers {
   /** Coarse to fine, overlapping `view`. */
   visible(view: Rect): Layer[] {
     return this.ordered.filter((layer) => intersects(layer.bounds, view));
+  }
+
+  /** Of `visible`, those whose mesh still shows: inside a coarser layer already at `pixel` world units, finer ones add nothing. */
+  meshed(visible: readonly Layer[], pixel: number): Layer[] {
+    const kept: Layer[] = [];
+    for (const layer of visible) {
+      const covered = kept.some(
+        ({ bounds, patch }) => patch.spacing <= pixel && contains(bounds, layer.bounds),
+      );
+      if (!covered) kept.push(layer);
+    }
+    return kept;
   }
 
   /** Requests whatever finer patches and tiles the current view needs. */

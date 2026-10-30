@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Disk Atlas</title>
     <link rel="stylesheet" href="/src/styles.css" />
-    <script type="module" src="/src/main.ts" defer></script>
+    <script type="module" src="/src/main.ts"></script>
   </head>
 
   <body>
@@ -13,8 +13,11 @@
     <canvas id="terrain"></canvas>
     <canvas id="ink"></canvas>
 
-    <button id="rescan" hidden><span>☞</span> New Survey</button>
-    <div id="toast" class="slip" hidden>Surveying…</div>
+    <div id="tickets" hidden>
+      <button id="rescan">New Survey</button>
+      <nav id="themes" aria-label="Map style"></nav>
+    </div>
+    <div id="toast" hidden>Surveying…</div>
 
     <aside id="legend" hidden>
       <div id="legend-body">

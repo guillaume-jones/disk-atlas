@@ -23,6 +23,11 @@ export function number(value: unknown): number {
   return value;
 }
 
+export function boolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw fail("a boolean", value);
+  return value;
+}
+
 export function string(value: unknown): string {
   if (typeof value !== "string") throw fail("a string", value);
   return value;

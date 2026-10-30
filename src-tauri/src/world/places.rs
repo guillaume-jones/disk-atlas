@@ -99,7 +99,7 @@ pub fn cities(geo: &Geo, mesh: &Mesh, owners: &Owners, placed: Option<&HashSet<R
     let mut hearts: HashMap<RegionId, (u32, usize)> = HashMap::new();
     for c in 0..mesh.len() {
         let Some(r) = owners[c] else { continue };
-        if geo.region(r).city.is_none() || !wanted(r) {
+        if !geo.region(r).settled || !wanted(r) {
             continue;
         }
         let heart = hearts.entry(r).or_insert((0, c));
