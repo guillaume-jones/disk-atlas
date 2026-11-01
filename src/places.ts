@@ -16,7 +16,7 @@ const CITY_POPULATION = 4000;
 const CITY_REGION_PX = 30;
 /** Clearance between a name and the map's frame, and between a city's symbol and its name. */
 const GAP = 4;
-const HAIR_SPACE = " ";
+export const HAIR_SPACE = " ";
 const HALO_PX = 3;
 
 /** Sets `text` at (x, y) under the current alignment, over an outline when the theme has one. */

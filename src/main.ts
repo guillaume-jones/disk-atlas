@@ -96,9 +96,7 @@ class Atlas {
     this.refineTimer = window.setTimeout(() => {
       this.resting = true;
       this.dirty = true;
-      if (!this.session) return;
-      this.session.layers.refine();
-      this.sheet.updateScale(this.camera, this.session.survey.meta.capacity);
+      this.session?.layers.refine();
     }, REFINE_DELAY_MS);
   }
 

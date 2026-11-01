@@ -15,6 +15,7 @@ export const SHEET = {
   paper: 10,
   /** Between the frame and the recency key, and below the key. */
   keyGap: 12,
+  keyHeight: 32,
   /** Room reserved below the map for the frame and the recency key when fitting. */
   fitBelow: 100,
   /** Room reserved above the map for the New Survey ticket when fitting. */

@@ -80,8 +80,3 @@ npm run tauri build
 ```
 
 To install it instead, run the installer in `src-tauri\target\release\bundle\nsis\`.
-
-### Release
-
-Bump `version` in `src-tauri/tauri.conf.json`, then release on GitHub with a matching version tag.
-Actions take care of building and signing for Apple & Windows.

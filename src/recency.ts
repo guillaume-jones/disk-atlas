@@ -8,9 +8,9 @@ interface RecencyBand {
 export const RECENCY_BANDS: readonly RecencyBand[] = [
   { label: "Over 2 years", newerThanDays: null },
   { label: "1 to 2 years", newerThanDays: 730 },
-  { label: "6 to 12 months", newerThanDays: 365 },
-  { label: "3 to 6 months", newerThanDays: 180 },
-  { label: "6 weeks to 3 months", newerThanDays: 90 },
+  { label: "6 to 12\nmonths", newerThanDays: 365 },
+  { label: "3 to 6\nmonths", newerThanDays: 180 },
+  { label: "6 weeks to\n3 months", newerThanDays: 90 },
   { label: "3 to 6 weeks", newerThanDays: 45 },
   { label: "1 to 3 weeks", newerThanDays: 21 },
   { label: "1 to 7 days", newerThanDays: 7 },

@@ -1,5 +1,6 @@
 import type { Camera } from "./camera";
 import { clamp, type Rect } from "./geometry";
+import { drawKey } from "./key";
 import type { Layer, Layers } from "./layers";
 import { SHEET, WORLD, WORLD_HEIGHT, WORLD_WIDTH } from "./layout";
 import { drawPlaces } from "./places";
@@ -13,7 +14,7 @@ const CULL_MARGIN_PX = 8;
 const DEGREE_FONT_PX = 8.5;
 const FRAME_RULE_MAX_PX = 4;
 
-/** The 2D overlay printed over the terrain: graticule, rivers, borders, frame and names. */
+/** The 2D overlay printed over the terrain: graticule, rivers, borders, frame, names and key. */
 export class Ink {
   private readonly ctx: CanvasRenderingContext2D;
 
@@ -73,6 +74,7 @@ export class Ink {
     ctx.clip();
     drawPlaces(ctx, camera, survey, layers, level, map, theme);
     ctx.restore();
+    drawKey(ctx, camera, survey.meta.capacity, theme);
   }
 
   private drawGraticule({ color, width }: NonNullable<Theme["ink"]["graticule"]>, px: number) {

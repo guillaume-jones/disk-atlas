@@ -74,8 +74,6 @@ type PageStyle =
   | "note-margin"
   | "note-lines"
   | "heading-case"
-  | "legend-letter-spacing"
-  | "key-border"
   | "ticket-border"
   | "corner-radius"
   | "display-font"
@@ -94,6 +92,8 @@ export interface Theme {
     /** By level: continent, nation, province, then everything finer. */
     borders: readonly BorderStyle[];
     frame: string | null;
+    /** `headingSpacing` is hair spaces between the heading's letters. */
+    key: { rule: string; headingSpacing: number };
   };
   places: {
     ocean: Typography;

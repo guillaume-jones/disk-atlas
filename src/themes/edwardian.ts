@@ -119,6 +119,7 @@ export const edwardian: Theme = {
       { color: "rgba(90,60,45,0.5)", width: 0.8, dash: [1, 2.5] },
     ],
     frame: "#000",
+    key: { rule: "#000", headingSpacing: 1 },
   },
   places: {
     ocean: { ...type, sizePerRadius: 0.09, minSize: 13, maxSize: 24, style: "italic", letterSpacing: 5, upper: true },
@@ -157,9 +158,7 @@ export const edwardian: Theme = {
     "note-paper": "#f4eedc",
     "note-margin": "rgba(170, 60, 50, 0.4)",
     "note-lines": "rgba(70, 100, 140, 0.18)",
-    "legend-letter-spacing": "0.16em",
     "heading-case": "uppercase",
-    "key-border": "1px solid #000",
     "ticket-border": "3px double #000",
     "corner-radius": "0",
     "display-font": `"IM Fell English SC", Georgia, serif`,

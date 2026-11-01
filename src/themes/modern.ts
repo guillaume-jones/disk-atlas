@@ -107,6 +107,7 @@ export const modern: Theme = {
       { color: "rgba(60,64,67,0.45)", width: 0.7, dash: [2, 3] },
     ],
     frame: null,
+    key: { rule: "#dadce0", headingSpacing: 0 },
   },
   places: {
     ocean: { ...type, sizePerRadius: 0.09, minSize: 12, maxSize: 20, style: "normal", ink: "#1a7a9c", halo: null },
@@ -145,9 +146,7 @@ export const modern: Theme = {
     "note-paper": "#ffffff",
     "note-margin": "transparent",
     "note-lines": "transparent",
-    "legend-letter-spacing": "0.04em",
     "heading-case": "none",
-    "key-border": "1px solid #dadce0",
     "ticket-border": "1px solid #dadce0",
     "corner-radius": "8px",
     "display-font": FONT,
