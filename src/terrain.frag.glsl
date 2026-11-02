@@ -63,24 +63,13 @@ float coastOctave(vec2 p, int k, float freq) {
   return u_coastAmps[k] * (vnoise(p * freq + float(k) * 17.3) - 0.5);
 }
 
-// Octaves fade in as their wavelength exceeds a few pixels, so coastlines keep fraying as you zoom.
-float coastNoise(vec2 p) {
-  float sum = 0.0;
-  float freq = COAST_FREQUENCY;
-  for (int k = 0; k < u_coastCount; k++) {
-    sum += coastOctave(p, k, freq);
-    freq *= 2.0;
-  }
-  return sum;
-}
-
 float bandEdgeDistance(float tone) {
   float nearest = 1e9;
   for (int i = 0; i < BAND_COUNT - 1; i++) nearest = min(nearest, abs(tone - u_edges[i]));
   return nearest;
 }
 
-// coastNoise, stopping once the remaining octaves can't carry e + gain * noise across a band edge or within `margin` of one.
+// Band edge noise, stopping once the remaining octaves can't carry e + gain * noise across a band edge or within `margin` of one.
 float bandNoise(vec2 p, float e, float gain, float margin) {
   float sum = 0.0;
   float freq = COAST_FREQUENCY;
@@ -93,14 +82,14 @@ float bandNoise(vec2 p, float e, float gain, float margin) {
 }
 
 void main() {
-  float nearCoast = 1.0 - smoothstep(0.0, 0.1, abs(v_elev));
-  float noise = nearCoast > 0.0 ? coastNoise(v_world) : 0.0;
-  float e = v_elev + noise * 0.05 * nearCoast;
+  float e = v_elev;
   float aa = max(fwidth(e), 1e-6);
   float land = smoothstep(-aa, aa, e);
 
   // Water: pale printed blue with engraved water-lines hugging the shore.
   float depth = clamp(-e, 0.0, 1.0);
+  // Sea cells are coarse: the wobble keeps shallows and water-lines from showing their straight edges.
+  if (depth > 0.0 && depth < 0.12) depth += 0.016 * (vnoise(v_world * 70.0) + 0.5 * vnoise(v_world * 150.0) - 0.75);
   vec3 water = depth < 0.04 ? u_shallows : u_sea;
   float k = depth * 55.0;
   float line = 1.0 - smoothstep(0.0, 1.1, abs(fract(k) - 0.5) / max(fwidth(k), 1e-5));
@@ -108,8 +97,7 @@ void main() {
 
   // Land: stepped tints with a thin contour at each band edge.
   float tone = e;
-  if (u_patchiness > 0.0 && land > 0.0)
-    tone += u_patchiness * (nearCoast > 0.0 ? noise : bandNoise(v_world, e, u_patchiness, aa));
+  if (u_patchiness > 0.0 && land > 0.0) tone += u_patchiness * bandNoise(v_world, e, u_patchiness, aa);
   int band = 0;
   for (int i = 0; i < BAND_COUNT - 1; i++) {
     if (tone >= u_edges[i]) band = i + 1;

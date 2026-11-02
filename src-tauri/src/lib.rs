@@ -59,6 +59,35 @@ fn full_disk_access_needed(root: String) -> bool {
     needs_full_disk_access(&root)
 }
 
+/// `WKWebView` holds rendering near 60 Hz unless this private preference is off. Without the API, it stays capped.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn uncap_frame_rate(webview: &tauri::webview::PlatformWebview) {
+    use objc2::{class, msg_send, rc::Retained, runtime::AnyObject, sel};
+    use objc2_foundation::{NSArray, NSString};
+
+    let preferences_class = class!(WKPreferences);
+    if !preferences_class.metaclass().responds_to(sel!(_features)) {
+        return;
+    }
+    // SAFETY: `inner` is a live WKWebView on the main thread, and each private selector is checked before it's sent.
+    unsafe {
+        let view = webview.inner().cast::<AnyObject>();
+        let configuration: Retained<AnyObject> = msg_send![view, configuration];
+        let preferences: Retained<AnyObject> = msg_send![&*configuration, preferences];
+        if !preferences.class().responds_to(sel!(_setEnabled:forFeature:)) {
+            return;
+        }
+        let features: Retained<NSArray<AnyObject>> = msg_send![preferences_class, _features];
+        for feature in &features {
+            let key: Retained<NSString> = msg_send![&*feature, key];
+            if key.to_string() == "PreferPageRenderingUpdatesNear60FPSEnabled" {
+                let _: () = msg_send![&*preferences, _setEnabled: false, forFeature: &*feature];
+            }
+        }
+    }
+}
+
 /// Runs the app.
 ///
 /// # Panics
@@ -74,7 +103,16 @@ pub fn run() {
             }
         });
     }
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.setup(|app| {
+        use tauri::Manager;
+        if let Some(window) = app.get_webview_window("main") {
+            window.with_webview(|webview| uncap_frame_rate(&webview))?;
+        }
+        Ok(())
+    });
+    builder
         .plugin(tauri_plugin_opener::init())
         .manage(engine)
         .invoke_handler(tauri::generate_handler![

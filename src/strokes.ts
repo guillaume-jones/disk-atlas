@@ -74,9 +74,15 @@ function cutChain(chain: readonly number[], window: Rect): StrokeRun[] {
 
 /** Joins segments end to end, so a dash pattern runs along a whole border instead of restarting at each segment. */
 function chained(segments: readonly Segment[]): number[][] {
-  const key = (x: number, y: number) => `${x},${y}`;
-  const touching = new Map<string, Segment[]>();
-  const touch = (at: string, segment: Segment) => {
+  const point = new Float32Array(2);
+  const pointBits = new Float64Array(point.buffer);
+  const key = (x: number, y: number) => {
+    point[0] = x;
+    point[1] = y;
+    return pointBits[0] ?? 0;
+  };
+  const touching = new Map<number, Segment[]>();
+  const touch = (at: number, segment: Segment) => {
     const list = touching.get(at);
     if (list) list.push(segment);
     else touching.set(at, [segment]);

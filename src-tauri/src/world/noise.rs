@@ -5,6 +5,9 @@ use noise::{NoiseFn, Perlin};
 const BASE_FREQ: f64 = 3.0;
 /// The finest octave a mesh can show spans this many cells.
 const CELLS_PER_OCTAVE_WAVE: f64 = 6.0;
+/// Frequency of the coarsest shoreline octave, in cycles per map height.
+const COAST_FREQ: f64 = 90.0;
+const COAST_OCTAVES: u32 = 4;
 
 pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
@@ -14,6 +17,20 @@ pub fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
 /// Number of terrain octaves a mesh with this lattice spacing can resolve.
 pub fn octaves(spacing: f64) -> u32 {
     ((1.0 / BASE_FREQ) / (CELLS_PER_OCTAVE_WAVE * spacing)).log2().ceil().max(1.0) as u32
+}
+
+/// Shoreline wiggle in about [-1, 1]. Its fixed octaves stop at the finest shape a coast has, so close up it's smooth.
+pub fn coast_wiggle(perlin: &Perlin, x: f64, y: f64) -> f64 {
+    let mut sum = 0.0;
+    let mut amplitude = 0.4;
+    let mut frequency = COAST_FREQ;
+    for i in 0..COAST_OCTAVES {
+        let offset = 23.7 * f64::from(i + 1);
+        sum += amplitude * perlin.get([x * frequency + offset, y * frequency - offset]);
+        amplitude *= 0.7;
+        frequency *= 2.0;
+    }
+    sum
 }
 
 /// Fractal Brownian motion remapped to [0, 1].

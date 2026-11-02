@@ -73,6 +73,7 @@ class Atlas {
 
   private readonly frame = () => {
     requestAnimationFrame(this.frame);
+    if (this.resting) this.session?.layers.loadArrival();
     if (!this.dirty) return;
     this.dirty = false;
     const { camera, session } = this;

@@ -236,7 +236,7 @@ impl Engine {
         }
         // Layouts depend on the parent patch, so rebuild it if evicted rather than borrowing a coarser ancestor.
         let parent = self.patch(parent.into())?;
-        let built = Arc::new(world::build_patch(geo, &parent.patch, id)?);
+        let built = Arc::new(world::build_patch(geo, &survey.world.patch, &parent.patch, id)?);
         lock(&survey.patches).insert(id, built.clone());
         Ok(built)
     }
@@ -261,7 +261,7 @@ impl Engine {
         parents.retain(|b| b.patch.overlaps(tile));
         parents.sort_by(|a, b| a.patch.spacing().total_cmp(&b.patch.spacing()));
         let parents: Vec<&Patch> = parents.iter().map(|b| &b.patch).collect();
-        let built = Arc::new(world::build_tile(&survey.geo, &parents, tile)?);
+        let built = Arc::new(world::build_tile(&survey.geo, &survey.world.patch, &parents, tile)?);
         lock(&survey.tiles).insert(tile, built.clone());
         Ok(built)
     }

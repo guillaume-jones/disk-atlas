@@ -18,7 +18,7 @@ use lines::Segment;
 use mesh::{Mesh, Pt, dist2};
 use places::{City, Label};
 use rayon::prelude::*;
-use terrain::Terrain;
+use terrain::{Terrain, VertexTriangles};
 
 /// Map extent in map units; tiles subdivide the unit square, so a level-0 tile is one map height.
 const WORLD_W: f64 = 2.0;
@@ -74,9 +74,15 @@ pub struct Patch {
     owners: Vec<Option<RegionId>>,
     ice: Vec<bool>,
     terrain: Terrain,
+    corners: VertexTriangles,
 }
 
 impl Patch {
+    fn new(scope: Scope, mesh: Mesh, owners: Vec<Option<RegionId>>, ice: Vec<bool>, terrain: Terrain) -> Self {
+        let corners = VertexTriangles::new(&mesh);
+        Patch { scope, mesh, owners, ice, terrain, corners }
+    }
+
     pub fn spacing(&self) -> f64 {
         self.mesh.spacing
     }
@@ -87,14 +93,55 @@ impl Patch {
         x0 < tx + size && x1 > tx && y0 < ty + size && y1 > ty
     }
 
-    /// The land cell owning `pt`, if this patch has one there.
-    fn land_at(&self, geo: &Geo, pt: Pt) -> Option<usize> {
+    fn is_land(&self, geo: &Geo, q: usize) -> bool {
+        self.mesh.inside[q] && self.owners[q].is_some_and(|r| geo.region(r).kind != RegionKind::Ocean)
+    }
+
+    /// Ground height and recency at `pt`, matching the GPU's interpolation of this mesh. `q` is a cell near `pt`.
+    fn surface_at(&self, q: usize, pt: Pt) -> (f64, f64) {
+        let Terrain { ground, recency, .. } = &self.terrain;
+        match self.corners.barycentric(&self.mesh, q, pt) {
+            Some(weights) => weights.iter().fold((0.0, 0.0), |(g, r), &(k, w)| {
+                (g + w * f64::from(ground[k]), r + w * f64::from(recency[k]))
+            }),
+            None => (f64::from(ground[q]), f64::from(recency[q])),
+        }
+    }
+
+    /// Ground height at `pt` on this mesh.
+    fn ground_at(&self, pt: Pt) -> f64 {
+        self.mesh.nearest(pt).map_or(0.0, |q| self.surface_at(q, pt).0)
+    }
+
+    /// `q`, the nearest cell to `pt`, or its nearest neighbour if the coast puts `pt` on the other side of land and sea.
+    fn coast_side(&self, geo: &Geo, world: &Patch, perlin: &Perlin, q: usize, pt: Pt) -> usize {
+        let land = self.is_land(geo, q);
+        let across = |c: usize| self.is_land(geo, c) != land;
+        if !self.mesh.any_neighbour(q, across) {
+            return q;
+        }
+        if (terrain::shoreline(perlin, pt, world.ground_at(pt)) > 0.0) == land {
+            return q;
+        }
+        self.mesh.nbrs[q]
+            .iter()
+            .map(|&c| c as usize)
+            .filter(|&c| across(c))
+            .min_by(|&a, &b| dist2(self.mesh.pts[a], pt).total_cmp(&dist2(self.mesh.pts[b], pt)))
+            .unwrap_or(q)
+    }
+
+    /// The land or shore cell owning `pt`, if this patch has one there. Shore sea cells keep the coast inside the tile.
+    /// Edge cells are skipped: they lack the triangles to interpolate `pt` smoothly.
+    fn land_at(&self, geo: &Geo, world: &Patch, perlin: &Perlin, pt: Pt) -> Option<usize> {
         let reach = LAND_REACH_SPACINGS * self.mesh.spacing;
-        self.mesh.nearest(pt).filter(|&q| {
-            self.mesh.inside[q]
-                && self.owners[q].is_some_and(|r| geo.region(r).kind != RegionKind::Ocean)
-                && dist2(self.mesh.pts[q], pt) < reach.powi(2)
-        })
+        let is_land = |q: usize| self.is_land(geo, q);
+        let covers = |q: usize| !self.mesh.edge[q] && (is_land(q) || self.mesh.any_neighbour(q, is_land));
+        self.mesh
+            .nearest(pt)
+            .filter(|&q| covers(q) && dist2(self.mesh.pts[q], pt) < reach.powi(2))
+            .map(|q| self.coast_side(geo, world, perlin, q, pt))
+            .filter(|&q| covers(q))
     }
 }
 
@@ -137,24 +184,17 @@ pub fn build_world(geo: &Geo) -> serde_json::Result<Built> {
         .collect();
     let terrain = terrain::world(geo, &mesh, &owners, &ice, &perlin);
     let overlay = Overlay {
-        shade: terrain::shade(&mesh, &terrain.elevation),
-        borders: lines::borders(geo, &mesh, &dual, &owners, None, &perlin),
-        rivers: lines::rivers(&mesh, &terrain.elevation, &ice, &perlin),
+        shade: terrain::shade(&mesh, &terrain.ground),
+        borders: lines::borders(geo, &mesh, &dual, &owners, &terrain.ground, None, &perlin),
+        rivers: lines::rivers(&mesh, &terrain.ground, &ice, &perlin),
         labels: places::labels(geo, &mesh, &owners, None),
         cities: places::cities(geo, &mesh, &owners, None, RegionId::WORLD),
     };
-    let patch = Patch {
-        scope: Scope::Region(RegionId::WORLD),
-        mesh,
-        owners,
-        ice,
-        terrain,
-    };
-    package(geo, patch, &overlay)
+    package(geo, Patch::new(Scope::Region(RegionId::WORLD), mesh, owners, ice, terrain), &overlay)
 }
 
 /// Finer patch for `region`, inheriting the parent's layout and adding the next levels of the region tree.
-pub fn build_patch(geo: &Geo, parent: &Patch, region: RegionId) -> serde_json::Result<Built> {
+pub fn build_patch(geo: &Geo, world: &Patch, parent: &Patch, region: RegionId) -> serde_json::Result<Built> {
     let pm = &parent.mesh;
     let within = |q: usize| pm.inside[q] && parent.owners[q].is_some_and(|r| geo.is_within(r, region));
     let cells: Vec<usize> = (0..pm.len()).filter(|&c| within(c)).collect();
@@ -170,52 +210,60 @@ pub fn build_patch(geo: &Geo, parent: &Patch, region: RegionId) -> serde_json::R
     let size = [x1 - x0 + 2.0 * pad, y1 - y0 + 2.0 * pad];
     let fill = (cells.len() as f64 * pm.spacing * pm.spacing / (size[0] * size[1])).clamp(MIN_PATCH_FILL, 1.0);
     let points = ((TARGET_CELLS as f64 / fill) as usize).min(MAX_PATCH_POINTS);
-    let locate = |pt: Pt| pm.nearest(pt).filter(|&q| within(q)).map(|cell| Located { parent: 0, cell });
+    let is_sea = |q: usize| pm.inside[q] && parent.owners[q].is_some_and(|r| geo.region(r).kind == RegionKind::Ocean);
+    let covered = |q: usize| within(q) || (is_sea(q) && pm.any_neighbour(q, &within));
+    let perlin = perlin(geo);
+    let locate = |pt: Pt| {
+        pm.nearest(pt)
+            .filter(|&q| covered(q))
+            .map(|q| parent.coast_side(geo, world, &perlin, q, pt))
+            .filter(|&q| covered(q))
+            .map(|cell| Located { parent: 0, cell })
+    };
     let (mesh, dual, located) = Mesh::build(&format!("region{region}"), [x0 - pad, y0 - pad], size, points, locate);
     let parents = [parent];
     let (mut owners, ice) = inherit(&parents, &located);
-    let perlin = perlin(geo);
     let mut layout = Layout::new(geo, &mesh, &perlin, region);
-    let all: Vec<usize> = (0..mesh.len()).filter(|&c| mesh.inside[c]).collect();
+    let all: Vec<usize> = (0..mesh.len())
+        .filter(|&c| owners[c].is_some_and(|r| geo.is_within(r, region)))
+        .collect();
     layout.subdivide(&mut owners, region, &all);
     let placed = layout.placed;
-    let terrain = terrain::refine(geo, &mesh, &owners, &ice, &parents, &located, &perlin);
+    let recency = terrain::patch_recency(geo, &mesh, &owners);
+    let (terrain, relief) = terrain::refine(&mesh, &ice, world, &parents, &located, &perlin, Some(&recency));
     let overlay = Overlay {
-        shade: terrain::shade(&mesh, &terrain.elevation),
-        borders: lines::borders(geo, &mesh, &dual, &owners, Some(&placed), &perlin),
+        shade: terrain::shade(&mesh, &relief),
+        borders: lines::borders(geo, &mesh, &dual, &owners, &terrain.ground, Some(&placed), &perlin),
         rivers: Vec::new(),
         labels: places::labels(geo, &mesh, &owners, Some(&placed)),
         cities: places::cities(geo, &mesh, &owners, Some(&placed), region),
     };
-    let patch = Patch { scope: Scope::Region(region), mesh, owners, ice, terrain };
-    package(geo, patch, &overlay)
+    package(geo, Patch::new(Scope::Region(region), mesh, owners, ice, terrain), &overlay)
 }
 
 /// Square quadtree tile adding terrain detail beyond what the region tree provides. Each point inherits from the
 /// finest of `parents` (sorted fine to coarse) that has land there.
-pub fn build_tile(geo: &Geo, parents: &[&Patch], tile: TileKey) -> serde_json::Result<Built> {
+pub fn build_tile(geo: &Geo, world: &Patch, parents: &[&Patch], tile: TileKey) -> serde_json::Result<Built> {
+    let perlin = perlin(geo);
     let locate = |pt: Pt| {
         parents
             .iter()
             .enumerate()
-            .find_map(|(parent, p)| p.land_at(geo, pt).map(|cell| Located { parent, cell }))
+            .find_map(|(parent, p)| p.land_at(geo, world, &perlin, pt).map(|cell| Located { parent, cell }))
     };
     let seed = format!("tile{}/{}/{}", tile.level, tile.x, tile.y);
-    let (mesh, _, located) = Mesh::build(&seed, tile.origin(), [tile.size(), tile.size()], TARGET_CELLS, locate);
+    let pad = PAD_SPACINGS * tile.size() / (TARGET_CELLS as f64).sqrt();
+    let [x, y] = tile.origin();
+    let size = tile.size() + 2.0 * pad;
+    let cells = (TARGET_CELLS as f64 * (size / tile.size()).powi(2)) as usize;
+    let (mesh, _, located) = Mesh::build(&seed, [x - pad, y - pad], [size, size], cells, locate);
     let (owners, ice) = inherit(parents, &located);
-    let terrain = terrain::refine(geo, &mesh, &owners, &ice, parents, &located, &perlin(geo));
+    let (terrain, relief) = terrain::refine(&mesh, &ice, world, parents, &located, &perlin, None);
     let overlay = Overlay {
-        shade: terrain::shade(&mesh, &terrain.elevation),
+        shade: terrain::shade(&mesh, &relief),
         ..Overlay::default()
     };
-    let patch = Patch {
-        scope: Scope::Tile { level: tile.level },
-        mesh,
-        owners,
-        ice,
-        terrain,
-    };
-    package(geo, patch, &overlay)
+    package(geo, Patch::new(Scope::Tile { level: tile.level }, mesh, owners, ice, terrain), &overlay)
 }
 
 fn inherit(parents: &[&Patch], located: &[Option<Located>]) -> (Vec<Option<RegionId>>, Vec<bool>) {

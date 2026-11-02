@@ -18,6 +18,8 @@ const CITY_REGION_PX = 30;
 const GAP = 4;
 export const HAIR_SPACE = " ";
 const HALO_PX = 3;
+/** Name sizes snap to this fraction of a pixel, so zooming reuses fonts and glyphs instead of rasterizing new ones every frame. */
+const SIZE_STEPS_PER_PX = 2;
 
 /** Sets `text` at (x, y) under the current alignment, over an outline when the theme has one. */
 function print(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, halo: string | null) {
@@ -92,7 +94,8 @@ export function drawPlaces(
           : region.depth === 2
             ? places.nation
             : places.local;
-    const size = clamp(radiusPx * type.sizePerRadius, type.minSize, type.maxSize);
+    const fitted = clamp(radiusPx * type.sizePerRadius, type.minSize, type.maxSize);
+    const size = Math.round(fitted * SIZE_STEPS_PER_PX) / SIZE_STEPS_PER_PX;
     ctx.font = `${type.style} ${size}px ${typeface}`;
     const name = type.upper ? region.name.toUpperCase() : region.name;
     const text = name.split("").join(HAIR_SPACE.repeat(type.letterSpacing));

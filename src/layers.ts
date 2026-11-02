@@ -87,6 +87,8 @@ export class Layers {
   private ordered: Layer[] = [];
   private readonly patchRequests = new Requests<number>(() => this.refine());
   private readonly tileRequests = new Requests<string>(() => this.refine());
+  /** Fetched meshes waiting for the view to rest, newest last. */
+  private readonly arrivals: (() => void)[] = [];
   private disposed = false;
 
   constructor(
@@ -130,18 +132,15 @@ export class Layers {
         const kind = survey.region(id).kind;
         if (!label || kind === "ocean" || kind === "isles" || this.patches.has(id)) continue;
         if (intersects(label.bounds, view))
-          this.patchRequests.run(id, async () => this.addPatch(await api.patch(id)));
+          this.patchRequests.run(id, () =>
+            this.arrive(api.patch(id), (patch) => this.addPatch(patch)),
+          );
       }
     }
 
     // Below the region tree, square tiles keep adding terrain detail once the region patches have settled.
     const centre = this.probe(camera.cx, camera.cy);
-    if (
-      centre &&
-      survey.region(centre.region).kind !== "ocean" &&
-      isCoarse(centre.layer.patch) &&
-      !this.patchRequests.busy
-    ) {
+    if (centre && isCoarse(centre.layer.patch) && !this.patchRequests.busy) {
       const level = clamp(
         Math.ceil(Math.log2(camera.scale / (REFINE_PX * TILE_CELLS_ACROSS))),
         TILE_LEVEL_MIN,
@@ -156,14 +155,19 @@ export class Layers {
             this.tiles.delete(key);
             this.tiles.set(key, tile);
           } else {
-            this.tileRequests.run(key, async () =>
-              this.addTile(key, await api.tile(level, ix, iy)),
+            this.tileRequests.run(key, () =>
+              this.arrive(api.tile(level, ix, iy), (patch) => this.addTile(key, patch)),
             );
           }
         }
       }
     }
     this.events.onBusy(this.patchRequests.busy || this.tileRequests.busy);
+  }
+
+  /** Loads the newest fetched mesh. Loading takes several milliseconds, so it's kept out of gestures, one per frame. */
+  loadArrival() {
+    this.arrivals.pop()?.();
   }
 
   /** The finest loaded layer with a mesh point near (x, y), and that point's region. */
@@ -202,6 +206,16 @@ export class Layers {
   dispose() {
     this.disposed = true;
     for (const layer of this.ordered) this.terrain.free(layer.gl);
+  }
+
+  private async arrive(fetched: Promise<Patch>, load: (patch: Patch) => void) {
+    const patch = await fetched;
+    await new Promise<void>((resolve) => {
+      this.arrivals.push(() => {
+        load(patch);
+        resolve();
+      });
+    });
   }
 
   private load(patch: Patch): Layer {

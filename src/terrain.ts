@@ -8,7 +8,7 @@ import vertexSource from "./terrain.vert.glsl?raw";
 
 const GRAIN_BASE_FREQUENCY = 400;
 const COAST_BASE_FREQUENCY = 90;
-const COAST_OCTAVES = 12;
+const COAST_OCTAVES = 7;
 const COAST_GAIN = 0.6;
 /** Grain octaves further than this from their 2 px peak weigh under 2% and are skipped. */
 const GRAIN_REACH = 2;
@@ -74,7 +74,9 @@ function sortedByCell({ pos, tris, ox, oy, cols, rows, spacing }: Patch) {
   const sorted = new Uint32Array(tris.length);
   for (const [t, cell] of cellOf.entries()) {
     const at = cursors[cell] ?? 0;
-    sorted.set(tris.subarray(3 * t, 3 * t + 3), at);
+    sorted[at] = tris[3 * t] ?? 0;
+    sorted[at + 1] = tris[3 * t + 1] ?? 0;
+    sorted[at + 2] = tris[3 * t + 2] ?? 0;
     cursors[cell] = at + 3;
   }
   return { sorted, cells };

@@ -2,6 +2,7 @@
 //! displacement.
 use super::Owners;
 use super::mesh::{Cheapest, Dual, Mesh, Pt, circumcenter};
+use super::terrain::shore_between;
 use crate::geo::{Geo, RegionId, RegionKind};
 use delaunator::EMPTY;
 use noise::{NoiseFn, Perlin};
@@ -46,9 +47,18 @@ fn wobbly(out: &mut Vec<Segment>, a: Pt, b: Pt, weight: f32, perlin: &Perlin, su
 }
 
 /// Voronoi edges between cells of different land regions, weighted by how deep their regions share ancestry.
-/// With `placed`, only borders around those regions are drawn.
-pub fn borders(geo: &Geo, mesh: &Mesh, dual: &Dual, owners: &Owners, placed: Option<&HashSet<RegionId>>, perlin: &Perlin) -> Vec<Segment> {
+/// With `placed`, only borders around those regions are drawn. A border reaching the sea runs on to the coast.
+pub fn borders(
+    geo: &Geo,
+    mesh: &Mesh,
+    dual: &Dual,
+    owners: &Owners,
+    ground: &[f32],
+    placed: Option<&HashSet<RegionId>>,
+    perlin: &Perlin,
+) -> Vec<Segment> {
     let (t, he) = (&dual.triangles, &dual.halfedges);
+    let next = |e: usize| if e % 3 == 2 { e - 2 } else { e + 1 };
     let centre = |tri: usize| circumcenter(mesh.pts[t[3 * tri]], mesh.pts[t[3 * tri + 1]], mesh.pts[t[3 * tri + 2]]);
     let mut out = Vec::new();
     for e in 0..he.len() {
@@ -56,7 +66,7 @@ pub fn borders(geo: &Geo, mesh: &Mesh, dual: &Dual, owners: &Owners, placed: Opt
         if o == EMPTY || o < e || !dual.kept[e / 3] || !dual.kept[o / 3] {
             continue;
         }
-        let (a, b) = (t[e], t[if e % 3 == 2 { e - 2 } else { e + 1 }]);
+        let (a, b) = (t[e], t[next(e)]);
         let (Some(ra), Some(rb)) = (owners[a], owners[b]) else { continue };
         if !mesh.inside[a] || !mesh.inside[b] || ra == rb {
             continue;
@@ -76,19 +86,30 @@ pub fn borders(geo: &Geo, mesh: &Mesh, dual: &Dual, owners: &Owners, placed: Opt
         {
             continue;
         }
-        wobbly(
-            &mut out,
-            centre(e / 3),
-            centre(o / 3),
-            f32::from(split),
-            perlin,
-            BORDER_SUBDIVISIONS,
-        );
+        let weight = f32::from(split);
+        let sea_past = |side: usize| {
+            let far = t[next(next(side))];
+            owners[far].is_some_and(|r| geo.region(r).kind == RegionKind::Ocean).then_some(far)
+        };
+        if sea_past(e).is_none() && sea_past(o).is_none() {
+            wobbly(&mut out, centre(e / 3), centre(o / 3), weight, perlin, BORDER_SUBDIVISIONS);
+            continue;
+        }
+        let (pa, pb) = (mesh.pts[a], mesh.pts[b]);
+        let middle = [pa[0].midpoint(pb[0]), pa[1].midpoint(pb[1])];
+        let middle_ground = ground[a].midpoint(ground[b]);
+        for side in [e, o] {
+            let end = sea_past(side).map_or_else(
+                || centre(side / 3),
+                |far| shore_between(perlin, (middle, middle_ground), (mesh.pts[far], ground[far])),
+            );
+            wobbly(&mut out, middle, end, weight, perlin, BORDER_SUBDIVISIONS);
+        }
     }
     out
 }
 
-/// Rivers from a priority flood that drains every basin to the sea without carving lakes.
+/// Rivers from a priority flood that drains every basin to the coast without carving lakes.
 pub fn rivers(mesh: &Mesh, elevation: &[f32], ice: &[bool], perlin: &Perlin) -> Vec<Segment> {
     let is_land = |c: usize| mesh.inside[c] && elevation[c] > 0.0 && !ice[c];
     let mut downstream: Vec<Option<usize>> = vec![None; mesh.len()];
@@ -138,16 +159,15 @@ pub fn rivers(mesh: &Mesh, elevation: &[f32], ice: &[bool], perlin: &Perlin) -> 
         if !is_land(c) || flux[c] < threshold {
             continue;
         }
-        let [x, y] = mesh.pts[c];
-        let mouth = if is_land(d) {
+        let end = if is_land(d) {
             mesh.pts[d]
         } else {
-            [x.midpoint(mesh.pts[d][0]), y.midpoint(mesh.pts[d][1])]
+            shore_between(perlin, (mesh.pts[c], elevation[c]), (mesh.pts[d], elevation[d]))
         };
         wobbly(
             &mut out,
             mesh.pts[c],
-            mouth,
+            end,
             (flux[c] / threshold).sqrt() as f32,
             perlin,
             RIVER_SUBDIVISIONS,
